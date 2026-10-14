@@ -1,18 +1,29 @@
+# --- Secretos y credenciales locales ----------------------------------------
 .env
+credenciales.txt
+scripts/config-email.env
+
+# --- Estado y registros del monitor --------------------------------------------
+scripts/.estado-rss.json
+scripts/.monitor.lock
+scripts/monitor.log
 *.log
-changedetection/*
-!changedetection/.gitkeep
-anythingllm/*
-!anythingllm/.gitkeep
+
+# --- Configuración local del usuario -------------------------------------------
+scripts/convenios.txt
+
+# --- Datos de los servicios (documentos, índices, configuración de las apps) -----
+# Se ignora todo el contenido; solo se versiona un .gitkeep para que la carpeta
+# exista al clonar (docker-compose.yml la monta como volumen).
 paperless/consume/*
 !paperless/consume/.gitkeep
 paperless/export/*
 !paperless/export/.gitkeep
-scripts/.estado-rss.json
-scripts/config-email.env
-scripts/convenios.txt
-scripts/.monitor.lock
-credenciales.txt
+anythingllm/*
+!anythingllm/.gitkeep
+changedetection/*
+!changedetection/.gitkeep
 
+# --- Python ----------------------------------------------------------------------
 __pycache__/
 *.pyc
