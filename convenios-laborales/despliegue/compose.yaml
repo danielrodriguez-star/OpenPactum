@@ -24,7 +24,7 @@ x-monitor: &monitor
   # USERMAP_UID/GID de Paperless). Lo mismo para el estado en /estado.
   user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"
   depends_on:
-    datos-init: {condition: service_completed_successfully}
+    secretos-init: {condition: service_completed_successfully}
   environment:
     OPENPACTUM_ESTADO: /estado/estado-rss.json
     OPENPACTUM_CONSUME: /consume
@@ -36,40 +36,35 @@ x-monitor: &monitor
     SMTP_USER: ${SMTP_USER:-}
     SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+    # Si usa el secreto del volumen: SMTP_PASSWORD_FILE=/run/secretos/smtp_password
+    SMTP_PASSWORD_FILE: ${SMTP_PASSWORD_FILE:-}
   volumes:
     - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/monitor:/estado
     - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/consume:/consume
+    - secretos:/run/secretos:ro
 
 services:
-  # Prepara el árbol de datos del host antes de arrancar el resto: crea los directorios y les
-  # da el propietario y los permisos que necesitan los contenedores que no corren como root.
-  datos-init:
+  # Genera los secretos que falten (en su propio volumen), los proyecta y prepara el árbol de
+  # datos del host antes de arrancar el resto. Es idempotente: no sobrescribe secretos ya
+  # existentes ni pisa datos.
+  secretos-init:
     image: alpine:3.20
     restart: "no"
+    user: "0:0"
     environment:
       USUARIO_UID: ${USERMAP_UID:-1000}
       USUARIO_GID: ${USERMAP_GID:-1000}
     volumes:
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}:/datos
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        umask 022
-        mkdir -p /datos/changedetection /datos/paperless/consume /datos/paperless/export \
-                 /datos/anythingllm /datos/monitor/estado
-        chown -R "$USUARIO_UID:$USUARIO_GID" /datos/paperless /datos/anythingllm /datos/monitor
-        chmod 0770 /datos/paperless/consume
-        # AnythingLLM guarda la configuración del asistente en un fichero, no en un directorio.
-        [ -e /datos/anythingllm/.env ] || : > /datos/anythingllm/.env
-        chown "$USUARIO_UID:$USUARIO_GID" /datos/anythingllm/.env
-        echo "Datos preparados en /datos."
+      - secretos:/secretos
+      - ${OPENPACTUM_DESPLEGUE:-.}/secretos-init.sh:/usr/local/lib/openpactum/secretos-init.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/lib/openpactum/secretos-init.sh"]
 
   changedetection:
     image: dgtlmoon/changedetection.io:0.50.14
     restart: unless-stopped
     depends_on:
-      datos-init: {condition: service_completed_successfully}
+      secretos-init: {condition: service_completed_successfully}
     ports: ["127.0.0.1:5000:5000"]
     environment:
       BASE_URL: http://localhost:5000
@@ -88,9 +83,11 @@ services:
     environment:
       POSTGRES_DB: paperless
       POSTGRES_USER: paperless
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD en despliegue/.env}
+      # La imagen oficial admite leer la contraseña de un fichero.
+      POSTGRES_PASSWORD_FILE: /run/secretos/postgres_password
     volumes:
       - postgres_datos:/var/lib/postgresql/data
+      - secretos:/run/secretos:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U paperless"]
       interval: 10s
@@ -100,7 +97,7 @@ services:
     image: ghcr.io/paperless-ngx/paperless-ngx:2.18.4
     restart: unless-stopped
     depends_on:
-      datos-init: {condition: service_completed_successfully}
+      secretos-init: {condition: service_completed_successfully}
       postgres: {condition: service_healthy}
       redis: {condition: service_started}
     ports: ["127.0.0.1:8000:8000"]
@@ -109,16 +106,20 @@ services:
       PAPERLESS_DBHOST: postgres
       PAPERLESS_DBNAME: paperless
       PAPERLESS_DBUSER: paperless
-      PAPERLESS_DBPASS: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD en despliegue/.env}
       PAPERLESS_TIME_ZONE: Europe/Madrid
       PAPERLESS_OCR_LANGUAGE: spa+eng
       PAPERLESS_OCR_MODE: redo
       PAPERLESS_URL: http://localhost:8000
-      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:?Defina PAPERLESS_SECRET_KEY en despliegue/.env}
       # Mismo UID/GID que el usuario del host, para que Paperless pueda leer y retirar los
       # PDF que deja el monitor en paperless/consume/.
       USERMAP_UID: ${USERMAP_UID:-1000}
       USERMAP_GID: ${USERMAP_GID:-1000}
+    # Paperless no admite el convenio *_FILE: secretos-init proyecta los valores del volumen
+    # en este fichero (0640, grupo USERMAP_GID) y Compose lo carga al arrancar. Si el fichero
+    # no existe todavía (primer arranque), ejecute antes `run --rm --no-deps secretos-init`.
+    env_file:
+      - path: ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/secretos/paperless.env
+        required: false
     volumes:
       - paperless_datos:/usr/src/paperless/data
       - paperless_media:/usr/src/paperless/media
@@ -146,7 +147,7 @@ services:
     image: mintplexlabs/anythingllm:1.8.4
     restart: unless-stopped
     depends_on:
-      datos-init: {condition: service_completed_successfully}
+      secretos-init: {condition: service_completed_successfully}
       ollama: {condition: service_started}
     ports: ["127.0.0.1:3001:3001"]
     # Pendiente de verificar: AnythingLLM pide SYS_ADMIN para su entorno de ejecución.
@@ -161,7 +162,7 @@ services:
       VECTOR_DB: lancedb
     volumes:
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/anythingllm:/app/server/storage
-      # Fichero de configuración del asistente inicial (lo crea datos-init).
+      # Fichero de configuración del asistente inicial (lo crea secretos-init).
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/anythingllm/.env:/app/server/.env
 
   # Ejecución manual: docker compose run --rm monitor
@@ -181,6 +182,9 @@ services:
         done
 
 volumes:
+  # Secretos generados por secretos-init. Este es el único sitio donde viven.
+  secretos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_secretos
   redis_datos:
     name: ${OPENPACTUM_PREFIJO:-openpactum}_redis_datos
   postgres_datos:

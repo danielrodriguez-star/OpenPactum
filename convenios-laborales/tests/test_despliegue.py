@@ -63,8 +63,8 @@ class ManifiestoTest(unittest.TestCase):
     def test_define_todos_los_servicios_de_la_pila(self):
         self.assertEqual(
             sorted(self.servicios),
-            ['anythingllm', 'changedetection', 'datos-init', 'modelos', 'monitor',
-             'ollama', 'paperless', 'postgres', 'programador', 'redis'],
+            ['anythingllm', 'changedetection', 'modelos', 'monitor', 'ollama', 'paperless',
+             'postgres', 'programador', 'redis', 'secretos-init'],
         )
 
     def test_no_usa_la_clave_version_obsoleta(self):
@@ -91,10 +91,10 @@ class ManifiestoTest(unittest.TestCase):
         dependencia = self.servicios['paperless']['depends_on']['postgres']
         self.assertEqual(dependencia['condition'], 'service_healthy')
 
-    def test_datos_init_termina_antes_que_los_servicios_que_montan_datos(self):
+    def test_secretos_init_termina_antes_que_los_servicios_que_montan_datos(self):
         for nombre in ('changedetection', 'paperless', 'anythingllm', 'monitor', 'programador'):
             with self.subTest(servicio=nombre):
-                dependencia = self.servicios[nombre]['depends_on']['datos-init']
+                dependencia = self.servicios[nombre]['depends_on']['secretos-init']
                 self.assertEqual(dependencia['condition'], 'service_completed_successfully')
 
     def test_el_estado_del_monitor_no_vive_en_el_sistema_de_ficheros_del_contenedor(self):
@@ -123,7 +123,7 @@ class ManifiestoTest(unittest.TestCase):
         self.assertEqual(self.servicios['monitor']['restart'], 'no')
 
     def test_los_servicios_de_ejecucion_unica_no_se_reinician(self):
-        for nombre in ('datos-init', 'modelos'):
+        for nombre in ('secretos-init', 'modelos'):
             with self.subTest(servicio=nombre):
                 self.assertEqual(self.servicios[nombre]['restart'], 'no')
 
@@ -215,22 +215,84 @@ class DocumentacionTest(unittest.TestCase):
         self.assertIn('nunca se han arrancado', texto)
 
 
+class SecretosTest(unittest.TestCase):
+    """Los secretos viven en un volumen que gestiona secretos-init, no en variables."""
+
+    def setUp(self):
+        self.manifiesto = cargar()
+        self.servicios = self.manifiesto['services']
+
+    def test_el_volumen_de_secretos_lleva_el_prefijo(self):
+        self.assertIn('name: ${OPENPACTUM_PREFIJO:-openpactum}_secretos', texto_crudo())
+        self.assertEqual(self.manifiesto['volumes']['secretos']['name'], 'openpactum_secretos')
+        self.assertEqual(cargar({'OPENPACTUM_PREFIJO': 'otro'})['volumes']['secretos']['name'],
+                         'otro_secretos')
+
+    def test_secretos_init_monta_el_volumen_y_su_script(self):
+        servicio = self.servicios['secretos-init']
+        self.assertIn('secretos:/secretos', servicio['volumes'])
+        # El script se monta desde el directorio del despliegue, que no tiene por qué ser el
+        # directorio actual (el contenedor de arranque lo fija con OPENPACTUM_DESPLEGUE).
+        self.assertIn('./secretos-init.sh:/usr/local/lib/openpactum/secretos-init.sh:ro',
+                      servicio['volumes'])
+        self.assertIn('- ${OPENPACTUM_DESPLEGUE:-.}/secretos-init.sh:/usr/local/lib/openpactum/'
+                      'secretos-init.sh:ro', texto_crudo())
+        # Necesita root para ajustar propietarios y permisos del árbol de datos.
+        self.assertEqual(servicio['user'], '0:0')
+        self.assertEqual(servicio['entrypoint'],
+                         ['/bin/sh', '/usr/local/lib/openpactum/secretos-init.sh'])
+
+    def test_el_script_de_secretos_existe_en_el_repositorio(self):
+        self.assertTrue((DESPLIEGUE / 'secretos-init.sh').is_file())
+
+    def test_postgres_lee_su_contrasena_del_volumen(self):
+        postgres = self.servicios['postgres']
+        self.assertEqual(postgres['environment']['POSTGRES_PASSWORD_FILE'],
+                         '/run/secretos/postgres_password')
+        self.assertIn('secretos:/run/secretos:ro', postgres['volumes'])
+        self.assertNotIn('POSTGRES_PASSWORD', postgres['environment'])
+
+    def test_paperless_carga_los_secretos_proyectados(self):
+        # Su imagen no admite *_FILE: el volumen se proyecta a un fichero que carga Compose.
+        paperless = self.servicios['paperless']
+        self.assertEqual(paperless['env_file'], [{
+            'path': '/var/lib/openpactum/datos/secretos/paperless.env',
+            'required': False,
+        }])
+        self.assertIn('path: ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/secretos/paperless.env',
+                      texto_crudo())
+        self.assertNotIn('PAPERLESS_DBPASS', paperless['environment'])
+        self.assertNotIn('PAPERLESS_SECRET_KEY', paperless['environment'])
+
+    def test_el_monitor_puede_leer_la_contrasena_smtp_del_volumen(self):
+        self.assertIn('secretos:/run/secretos:ro', self.servicios['monitor']['volumes'])
+        # Por defecto va vacío: se activa con SMTP_PASSWORD_FILE=/run/secretos/smtp_password.
+        self.assertIn('SMTP_PASSWORD_FILE: ${SMTP_PASSWORD_FILE:-}', texto_crudo())
+        self.assertIsNone(self.servicios['monitor']['environment']['SMTP_PASSWORD_FILE'])
+
+    def test_el_ejemplo_explica_el_primer_arranque_en_dos_pasos(self):
+        ejemplo = ENV_EJEMPLO.read_text(encoding='utf-8')
+        self.assertIn('run --rm --no-deps secretos-init', ejemplo)
+        self.assertIn('escribir smtp_password', ejemplo)
+        self.assertNotRegex(ejemplo, r'(?m)^POSTGRES_PASSWORD=')
+        self.assertNotRegex(ejemplo, r'(?m)^PAPERLESS_SECRET_KEY=')
+
+
 class VariablesTest(unittest.TestCase):
     def test_las_variables_documentadas_aparecen_en_el_ejemplo(self):
         ejemplo = ENV_EJEMPLO.read_text(encoding='utf-8')
         for variable in ('OPENPACTUM_VERSION', 'OPENPACTUM_PROPIETARIO', 'OPENPACTUM_PREFIJO',
-                         'OPENPACTUM_DATOS',
-                         'POSTGRES_PASSWORD', 'PAPERLESS_SECRET_KEY', 'USERMAP_UID',
-                         'USERMAP_GID', 'MODELO', 'OPENPACTUM_INTERVALO', 'OPENPACTUM_RSS',
-                         'SMTP_HOST'):
+                         'OPENPACTUM_DATOS', 'OPENPACTUM_DESPLEGUE', 'USERMAP_UID', 'USERMAP_GID',
+                         'MODELO', 'OPENPACTUM_INTERVALO', 'OPENPACTUM_RSS', 'SMTP_HOST'):
             with self.subTest(variable=variable):
                 self.assertRegex(ejemplo, rf'(?m)^{re.escape(variable)}=')
 
-    def test_las_variables_obligatorias_estan_marcadas_como_tales(self):
+    def test_la_unica_variable_obligatoria_es_la_etiqueta_del_monitor(self):
         crudo = texto_crudo()
-        for variable in ('OPENPACTUM_VERSION', 'POSTGRES_PASSWORD', 'PAPERLESS_SECRET_KEY'):
-            with self.subTest(variable=variable):
-                self.assertIn(f'${{{variable}:?', crudo)
+        self.assertIn('${OPENPACTUM_VERSION:?', crudo)
+        # Los secretos no se piden por variable de entorno: los genera secretos-init.
+        self.assertNotIn('${POSTGRES_PASSWORD', crudo)
+        self.assertNotIn('${PAPERLESS_SECRET_KEY', crudo)
 
     def test_el_ejemplo_no_contiene_secretos_reales(self):
         ejemplo = ENV_EJEMPLO.read_text(encoding='utf-8')

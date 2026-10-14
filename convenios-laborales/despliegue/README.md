@@ -12,6 +12,7 @@ ficheros auxiliares se pueden descargar sueltos y ejecutar en cualquier equipo c
 | --- | --- |
 | `compose.yaml` | Manifiesto de la pila completa (vigilancia, Paperless, Ollama, AnythingLLM, monitor y programador). |
 | `.env.example` | Configuración del despliegue: prefijo, rutas, secretos, modelo y SMTP. |
+| `secretos-init.sh` | Genera los secretos en su volumen, los proyecta para Paperless y prepara los datos del host. |
 | `validar-despliegue.sh` | Prueba local: sintaxis, pruebas unitarias y validez del manifiesto. |
 
 ## Requisitos
@@ -34,17 +35,20 @@ ficheros auxiliares se pueden descargar sueltos y ejecutar en cualquier equipo c
    chmod 600 .env
    ```
 
-   Como mínimo, cambie `POSTGRES_PASSWORD` y `PAPERLESS_SECRET_KEY` (genere dos valores
-   distintos, por ejemplo con `python3 -c 'import secrets; print(secrets.token_urlsafe(48))'`),
-   indique la etiqueta publicada en `OPENPACTUM_VERSION` y ajuste `USERMAP_UID`/`USERMAP_GID`
-   a su usuario (`id -u`, `id -g`). Con menos de 16 GB de RAM, cambie también `MODELO`.
-3. Arranque la pila y compruebe el estado:
+   Indique la etiqueta publicada en `OPENPACTUM_VERSION` y ajuste `USERMAP_UID`/`USERMAP_GID` a
+   su usuario (`id -u`, `id -g`). Con menos de 16 GB de RAM, cambie también `MODELO`. **No hay
+   contraseñas en este fichero**: las genera `secretos-init`.
+3. Primer arranque, en dos pasos (los secretos tienen que existir antes de que Compose lea la
+   configuración de Paperless):
 
    ```bash
+   docker compose --env-file .env -f compose.yaml run --rm --no-deps secretos-init
    docker compose --env-file .env -f compose.yaml up -d
    docker compose --env-file .env -f compose.yaml ps
    docker compose --env-file .env -f compose.yaml logs -f modelos   # descarga de modelos
    ```
+
+   Los arranques siguientes ya son un solo comando (`up -d`).
 
 Los puertos se publican **solo en `127.0.0.1`**: Changedetection en 5000, Paperless en 8000 y
 AnythingLLM en 3001. Ollama no publica puerto. El servicio `datos-init` prepara el árbol de datos
@@ -56,9 +60,35 @@ AnythingLLM, SMTP) siguen siendo manuales y están descritos en el
 ### Prefijo del proyecto
 
 `OPENPACTUM_PREFIJO` (por defecto `openpactum`) nombra el proyecto de Compose y los volúmenes
-(`openpactum_postgres_datos`, `openpactum_ollama_datos`, …). Sirve para tener dos instalaciones en
-el mismo equipo sin que se pisen; los nombres de los volúmenes están fijados de forma explícita
-para que cambiar el prefijo no deje los datos anteriores huérfanos.
+(`openpactum_postgres_datos`, `openpactum_ollama_datos`, …, incluido el volumen de secretos
+`openpactum_secretos`). Sirve para tener dos instalaciones en el mismo equipo sin que se pisen; los
+nombres de los volúmenes están fijados de forma explícita para que cambiar el prefijo no deje los
+datos anteriores huérfanos.
+
+### Secretos y datos
+
+`secretos-init` (servicio de un solo uso, se ejecuta antes que el resto):
+
+- Genera `postgres_password` y `paperless_secret_key` en el volumen `<prefijo>_secretos`, con
+  `/dev/urandom`. **Nunca sobrescribe** un secreto existente y nunca lo imprime.
+- Proyecta ambos en `<datos>/secretos/paperless.env` (0640, grupo `USERMAP_GID`) para Paperless,
+  cuya imagen no admite el convenio `*_FILE`. Es un artefacto derivado: se puede borrar y se
+  regenera a partir del volumen.
+- Prepara el árbol de datos del host (directorios, propietario `USERMAP_UID:GID` y permisos de
+  `paperless/consume`), que antes hacía `preparar.sh` al instalar con `instalar.sh`.
+
+Postgres sí admite ficheros (`POSTGRES_PASSWORD_FILE`) y el monitor también
+(`SMTP_PASSWORD_FILE`), así que ambos leen del volumen directamente. Para guardar un secreto que
+no se genera solo:
+
+```bash
+printf '%s' 'clave-smtp' | docker compose --env-file .env -f compose.yaml run --rm -T --no-deps secretos-init escribir smtp_password
+```
+
+y después `SMTP_PASSWORD_FILE=/run/secretos/smtp_password` en el fichero de entorno. Los ficheros
+se crean con permisos `0640`: si su usuario no puede leer el fichero proyectado, `docker compose`
+lo dirá al arrancar (ajuste el grupo del fichero o ejecute el arranque con el mismo usuario con el
+que se crearon los secretos).
 
 ### Monitor y programador
 
@@ -99,6 +129,8 @@ pendiente.
 
 - `COMPOSE_SHA256` no está definido: sin esa variable de repositorio no se construye la imagen del
   contenedor de arranque (fase 4).
+- Nadie ha comprobado todavía el ciclo completo de secretos con Docker (permisos reales del
+  volumen, `env_file` de Paperless y `POSTGRES_PASSWORD_FILE`).
 - Los digests de las imágenes no están fijados y Redis usa la etiqueta flotante `7-alpine`.
 - El `cap_add: SYS_ADMIN` de AnythingLLM no se ha verificado.
 - `MIGRACION.md` (paso desde la instalación con `instalar.sh`) todavía no está escrito.
