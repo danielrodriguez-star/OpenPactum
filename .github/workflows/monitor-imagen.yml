@@ -1,0 +1,93 @@
+# Pruebas del monitor y publicación de su imagen en GHCR.
+#
+# - Pull request: ejecuta pruebas y construye la imagen sin publicarla.
+# - Push a main o etiqueta vX.Y.Z: publica ghcr.io/<propietario>/openpactum-monitor
+#   con etiquetas semver (X.Y.Z, X.Y) y sha-<commit>. No se publica la etiqueta "latest".
+# Las acciones están fijadas por commit SHA; actualícelas de forma deliberada.
+name: Imagen del monitor
+
+on:
+  pull_request:
+    paths:
+      - 'convenios-laborales/scripts/**'
+      - 'convenios-laborales/monitor/**'
+      - 'convenios-laborales/tests/**'
+      - '.github/workflows/monitor-imagen.yml'
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths:
+      - 'convenios-laborales/scripts/**'
+      - 'convenios-laborales/monitor/**'
+      - 'convenios-laborales/tests/**'
+      - '.github/workflows/monitor-imagen.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor-imagen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    name: Pruebas unitarias
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Ejecutar pruebas
+        run: python3 -m unittest discover -s convenios-laborales/tests -v
+
+  imagen:
+    name: Construir y publicar imagen
+    needs: pruebas
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Calcular etiquetas
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/openpactum-monitor
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Iniciar sesión en GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construir (y publicar si no es un pull request)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: convenios-laborales/scripts
+          file: convenios-laborales/monitor/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            OPENPACTUM_VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
