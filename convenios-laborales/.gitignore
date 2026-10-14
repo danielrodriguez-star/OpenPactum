@@ -11,6 +11,8 @@ paperless/export/*
 scripts/.estado-rss.json
 scripts/config-email.env
 scripts/convenios.txt
+scripts/.monitor.lock
+credenciales.txt
 
 __pycache__/
 *.pyc
