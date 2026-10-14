@@ -199,6 +199,22 @@ class ValidadorTest(unittest.TestCase):
         self.assertIn('Sintaxis de los scripts', resultado.stdout)
 
 
+class DocumentacionTest(unittest.TestCase):
+    LECTURA = DESPLIEGUE / 'README.md'
+
+    def test_el_readme_documenta_la_prueba_local(self):
+        texto = self.LECTURA.read_text(encoding='utf-8')
+        self.assertIn('./despliegue/validar-despliegue.sh', texto)
+        for opcion in ('--sin-sintaxis', '--sin-pruebas', '--sin-docker'):
+            with self.subTest(opcion=opcion):
+                self.assertIn(opcion, texto)
+
+    def test_el_readme_no_promete_una_instalacion_probada(self):
+        texto = self.LECTURA.read_text(encoding='utf-8')
+        self.assertIn('sin probar con Docker real', texto)
+        self.assertIn('nunca se han arrancado', texto)
+
+
 class VariablesTest(unittest.TestCase):
     def test_las_variables_documentadas_aparecen_en_el_ejemplo(self):
         ejemplo = ENV_EJEMPLO.read_text(encoding='utf-8')
