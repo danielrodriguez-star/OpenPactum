@@ -14,7 +14,9 @@ from pathlib import Path
 
 import yaml
 
-DESPLIEGUE = Path(__file__).resolve().parent.parent / 'despliegue'
+CONVENIOS = Path(__file__).resolve().parent.parent
+RAIZ_REPO = CONVENIOS.parent
+DESPLIEGUE = CONVENIOS / 'despliegue'
 COMPOSE = DESPLIEGUE / 'compose.yaml'
 ENV_EJEMPLO = DESPLIEGUE / '.env.example'
 
@@ -199,6 +201,82 @@ class ValidadorTest(unittest.TestCase):
         self.assertIn('Sintaxis de los scripts', resultado.stdout)
 
 
+class HigieneTest(unittest.TestCase):
+    """Reglas de estilo del manifiesto que evitan problemas conocidos."""
+
+    def setUp(self):
+        self.manifiesto = cargar()
+        self.servicios = self.manifiesto['services']
+
+    def test_el_modelo_de_conversacion_es_una_sola_variable(self):
+        # Antes cada servicio tenía su propia variable: un cambio en una dejaba la pila
+        # descuadrada (Ollama con un modelo y AnythingLLM apuntando a otro).
+        crudo = texto_crudo()
+        self.assertNotIn('${MODELO', crudo)
+        self.assertEqual(self.servicios['modelos']['environment']['OPENPACTUM_MODELO'],
+                         'llama3.1:8b')
+        self.assertEqual(self.servicios['anythingllm']['environment']['OLLAMA_MODEL_PREF'],
+                         'llama3.1:8b')
+        # En el manifiesto, `$$` escapa el dólar para que lo expanda el shell del contenedor.
+        self.assertIn('ollama pull "$${OPENPACTUM_MODELO}"', crudo)
+
+    def test_el_modelo_es_configurable_de_una_vez_para_toda_la_pila(self):
+        manifiesto = cargar({'OPENPACTUM_MODELO': 'qwen2.5:7b'})
+        self.assertEqual(manifiesto['services']['anythingllm']['environment']['OLLAMA_MODEL_PREF'],
+                         'qwen2.5:7b')
+        self.assertEqual(str(manifiesto['services']['modelos']['environment']['OPENPACTUM_MODELO']),
+                         'qwen2.5:7b')
+
+    def test_los_embeddings_son_fijos_y_distintos_del_modelo_de_conversacion(self):
+        self.assertEqual(self.servicios['anythingllm']['environment']['EMBEDDING_MODEL_PREF'],
+                         'nomic-embed-text')
+        self.assertIn('ollama pull nomic-embed-text', texto_crudo())
+
+    def test_redis_tiene_healthcheck_y_paperless_lo_espera(self):
+        self.assertIn('healthcheck', self.servicios['redis'])
+        self.assertEqual(self.servicios['paperless']['depends_on']['redis']['condition'],
+                         'service_healthy')
+
+    def test_todos_los_servicios_declaran_politica_de_reinicio(self):
+        for nombre, servicio in self.servicios.items():
+            with self.subTest(servicio=nombre):
+                self.assertIn('restart', servicio)
+
+    def test_no_se_usan_claves_obsoletas(self):
+        crudo = texto_crudo()
+        for clave in ('links:', 'expose:', 'container_name:', 'networks:'):
+            with self.subTest(clave=clave):
+                self.assertNotIn(clave, crudo)
+
+    def test_el_manifiesto_apunta_al_inventario_de_pendientes(self):
+        self.assertIn('docs/INVENTARIO-FASE-5.md', texto_crudo())
+
+
+class InventarioTest(unittest.TestCase):
+    INVENTARIO = CONVENIOS / 'docs' / 'INVENTARIO-FASE-5.md'
+
+    def texto(self):
+        return ' '.join(self.INVENTARIO.read_text(encoding='utf-8').split())
+
+    def test_existe_y_nombra_los_pendientes_declarados(self):
+        self.assertTrue(self.INVENTARIO.is_file())
+        texto = self.texto()
+        for pendiente in ('COMPOSE_SHA256', 'MIGRACION.md', 'SYS_ADMIN', 'Digests',
+                          'redis:7-alpine', 'Docker real'):
+            with self.subTest(pendiente=pendiente):
+                self.assertIn(pendiente, texto)
+
+    def test_inventaria_lo_que_se_retira_en_la_fase_5(self):
+        texto = self.texto()
+        for fichero in ('instalar.sh', 'scripts/', 'monitor-convenios.py', 'docker-compose.yml'):
+            with self.subTest(fichero=fichero):
+                self.assertIn(fichero, texto)
+        self.assertIn('`monitor-convenios.py` no se retira', texto.replace('**', ''))
+
+    def test_no_da_por_hecho_lo_que_no_esta_probado(self):
+        self.assertIn('Ninguna de estas está puesta', self.texto())
+
+
 class DocumentacionTest(unittest.TestCase):
     LECTURA = DESPLIEGUE / 'README.md'
 
@@ -213,6 +291,18 @@ class DocumentacionTest(unittest.TestCase):
         texto = self.LECTURA.read_text(encoding='utf-8')
         self.assertIn('sin probar con Docker real', texto)
         self.assertIn('nunca se han arrancado', texto)
+
+    def test_los_readmes_apuntan_al_despliegue_nuevo_y_a_sus_pendientes(self):
+        for fichero in (RAIZ_REPO / 'README.md', CONVENIOS / 'README.md'):
+            with self.subTest(fichero=fichero.name):
+                texto = fichero.read_text(encoding='utf-8')
+                self.assertIn('despliegue/README.md', texto)
+                self.assertIn('docs/INVENTARIO-FASE-5.md', texto)
+
+    def test_el_readme_principal_avisa_de_que_la_imagen_no_se_publica(self):
+        texto = (RAIZ_REPO / 'README.md').read_text(encoding='utf-8')
+        self.assertIn('COMPOSE_SHA256', texto)
+        self.assertIn('No se ha probado con Docker real', texto)
 
 
 class SecretosTest(unittest.TestCase):
@@ -283,7 +373,8 @@ class VariablesTest(unittest.TestCase):
         ejemplo = ENV_EJEMPLO.read_text(encoding='utf-8')
         for variable in ('OPENPACTUM_VERSION', 'OPENPACTUM_PROPIETARIO', 'OPENPACTUM_PREFIJO',
                          'OPENPACTUM_DATOS', 'OPENPACTUM_DESPLEGUE', 'USERMAP_UID', 'USERMAP_GID',
-                         'MODELO', 'OPENPACTUM_INTERVALO', 'OPENPACTUM_RSS', 'SMTP_HOST'):
+                         'OPENPACTUM_MODELO', 'OPENPACTUM_INTERVALO', 'OPENPACTUM_RSS',
+                         'SMTP_HOST'):
             with self.subTest(variable=variable):
                 self.assertRegex(ejemplo, rf'(?m)^{re.escape(variable)}=')
 

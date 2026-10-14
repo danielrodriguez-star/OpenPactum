@@ -2,6 +2,16 @@
 
 **Estado:** el instalador y la configuración se han validado sin Docker (sintaxis, `shellcheck`, esquema de Compose y simulación del instalador); **no se han probado todavía en una máquina con Docker**. No se garantiza cumplimiento RGPD por instalar software: evalúe además acceso, copias, retención y proveedor SMTP.
 
+## Dos formas de instalar
+
+- **Despliegue autónomo (fases 3-4, sin probar con Docker)**: [despliegue/README.md](despliegue/README.md).
+  No requiere clonar el repositorio, los secretos se generan en un volumen gestionado por
+  `secretos-init`, el programador sustituye a la tarea cron y hay un contenedor de arranque que lo
+  hace todo con un solo comando. Pendientes en
+  [docs/INVENTARIO-FASE-5.md](docs/INVENTARIO-FASE-5.md).
+- **Instalación con checkout (la probada hasta ahora)**: las secciones siguientes, con
+  `instalar.sh`. Se retira en la fase 5.
+
 ## Instalación automática (Debian/Ubuntu)
 
 Copie **esta carpeta** a su equipo (por ejemplo, `~/convenios-laborales/`) y ejecute con su usuario normal, **sin sudo** (la pedirá cuando haga falta):

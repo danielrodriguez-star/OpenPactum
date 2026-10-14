@@ -9,6 +9,7 @@
 #
 # AVISO: este manifiesto no se ha arrancado nunca con Docker real. La única validación
 # automática es `docker compose config -q` en CI (.github/workflows/despliegue.yml).
+# Los pendientes (digests, cap_add de AnythingLLM, etc.) están en docs/INVENTARIO-FASE-5.md.
 
 # Prefijo del proyecto y de los volúmenes: permite varias instalaciones (o una de pruebas) en
 # el mismo equipo sin pisarse. Los nombres de los volúmenes se fijan de forma explícita para
@@ -72,10 +73,15 @@ services:
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/changedetection:/datastore
 
   redis:
+    # Pendiente (fase 5): fijar una etiqueta concreta en vez de la rama 7-alpine.
     image: redis:7-alpine
     restart: unless-stopped
     volumes:
       - redis_datos:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 10
 
   postgres:
     image: postgres:16-alpine
@@ -99,7 +105,7 @@ services:
     depends_on:
       secretos-init: {condition: service_completed_successfully}
       postgres: {condition: service_healthy}
-      redis: {condition: service_started}
+      redis: {condition: service_healthy}
     ports: ["127.0.0.1:8000:8000"]
     environment:
       PAPERLESS_REDIS: redis://redis:6379
@@ -135,12 +141,15 @@ services:
 
   modelos:
     image: ollama/ollama:0.9.6
-    depends_on: [ollama]
+    depends_on:
+      ollama: {condition: service_started}
     environment:
       OLLAMA_HOST: http://ollama:11434
-      MODELO: ${MODELO:-llama3.1:8b}
+      # Una sola variable (OPENPACTUM_MODELO) elige el modelo de conversación en toda la pila;
+      # el de embeddings es fijo (nomic-embed-text).
+      OPENPACTUM_MODELO: ${OPENPACTUM_MODELO:-llama3.1:8b}
     entrypoint: ["/bin/sh", "-c"]
-    command: ['until ollama list >/dev/null 2>&1; do sleep 3; done; ollama pull "$${MODELO}" && ollama pull nomic-embed-text']
+    command: ['until ollama list >/dev/null 2>&1; do sleep 3; done; ollama pull "$${OPENPACTUM_MODELO}" && ollama pull nomic-embed-text']
     restart: "no"
 
   anythingllm:
@@ -156,7 +165,7 @@ services:
       STORAGE_DIR: /app/server/storage
       LLM_PROVIDER: ollama
       OLLAMA_BASE_PATH: http://ollama:11434
-      OLLAMA_MODEL_PREF: ${MODELO:-llama3.1:8b}
+      OLLAMA_MODEL_PREF: ${OPENPACTUM_MODELO:-llama3.1:8b}
       EMBEDDING_ENGINE: ollama
       EMBEDDING_MODEL_PREF: nomic-embed-text
       VECTOR_DB: lancedb

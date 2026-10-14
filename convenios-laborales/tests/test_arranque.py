@@ -140,9 +140,9 @@ class ArranqueTest(unittest.TestCase):
     def test_no_pisa_el_fichero_de_entorno_existente(self):
         destino = self.ruta('despliegue')
         destino.mkdir(parents=True)
-        (destino / '.env').write_text('MODELO=qwen2.5:7b\n')
+        (destino / '.env').write_text('OPENPACTUM_MODELO=qwen2.5:7b\n')
         self.ejecutar('arriba')
-        self.assertEqual((destino / '.env').read_text(), 'MODELO=qwen2.5:7b\n')
+        self.assertEqual((destino / '.env').read_text(), 'OPENPACTUM_MODELO=qwen2.5:7b\n')
 
     def test_copia_el_script_de_secretos_que_lleva_dentro_la_imagen(self):
         self.ejecutar('arriba')
