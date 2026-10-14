@@ -46,6 +46,10 @@ services:
       PAPERLESS_OCR_MODE: redo
       PAPERLESS_URL: http://localhost:8000
       PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:?Defina PAPERLESS_SECRET_KEY en .env}
+      # Mismo UID/GID que el usuario del host, para que Paperless pueda leer y retirar
+      # los PDF que deja el monitor en paperless/consume/.
+      USERMAP_UID: ${USERMAP_UID:-1000}
+      USERMAP_GID: ${USERMAP_GID:-1000}
     volumes:
       - paperless_data:/usr/src/paperless/data
       - paperless_media:/usr/src/paperless/media
@@ -85,6 +89,8 @@ services:
       VECTOR_DB: lancedb
     volumes:
       - ./anythingllm:/app/server/storage
+      # Persiste la configuración del asistente inicial (debe existir como fichero: lo crea preparar.sh).
+      - ./anythingllm/.env:/app/server/.env
 
 volumes:
   redis_data:
