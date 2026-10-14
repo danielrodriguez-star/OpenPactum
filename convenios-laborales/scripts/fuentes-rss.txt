@@ -1,0 +1,4 @@
+https://www.boe.es/rss/c.php?f=disposiciones&c=221
+https://expinterweb.mites.gob.es/regcon/
+# Boletines provinciales: añada una URL por línea debajo.
+# IMPORTANTE: REGCON es una página web, no un feed RSS.

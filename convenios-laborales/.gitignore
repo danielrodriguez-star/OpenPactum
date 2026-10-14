@@ -1,0 +1,13 @@
+.env
+*.log
+changedetection/*
+!changedetection/.gitkeep
+anythingllm/*
+!anythingllm/.gitkeep
+paperless/consume/*
+!paperless/consume/.gitkeep
+paperless/export/*
+!paperless/export/.gitkeep
+scripts/.estado-rss.json
+scripts/config-email.env
+scripts/convenios.txt
