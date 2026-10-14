@@ -15,8 +15,10 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-STATE = ROOT / 'scripts/.estado-rss.json'
-CONSUME = ROOT / 'paperless/consume'
+# Rutas configurables para el contenedor (OPENPACTUM_ESTADO, OPENPACTUM_CONSUME).
+# Por defecto se mantienen las rutas de la instalación con checkout.
+STATE = Path(os.environ.get('OPENPACTUM_ESTADO') or ROOT / 'scripts/.estado-rss.json')
+CONSUME = Path(os.environ.get('OPENPACTUM_CONSUME') or ROOT / 'paperless/consume')
 RSS = 'https://www.boe.es/rss/c.php?f=disposiciones&c=221'
 USER_AGENT = 'OpenPactum/1.0 (vigilancia de convenios)'
 
@@ -24,6 +26,15 @@ USER_AGENT = 'OpenPactum/1.0 (vigilancia de convenios)'
 def fetch(url):
     with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': USER_AGENT}), timeout=30) as r:
         return r.read()
+
+
+def smtp_password():
+    # SMTP_PASSWORD_FILE permite leer la contraseña desde un fichero (Docker secrets).
+    # Se quitan solo los saltos de línea finales.
+    fichero = os.environ.get('SMTP_PASSWORD_FILE')
+    if fichero:
+        return Path(fichero).read_text(encoding='utf-8').rstrip('\r\n')
+    return os.environ.get('SMTP_PASSWORD', '')
 
 
 def mail(items):
@@ -44,12 +55,12 @@ def mail(items):
         with smtplib.SMTP(host, port, timeout=30) as server:
             server.starttls(context=ssl.create_default_context())
             if os.environ.get('SMTP_USER'):
-                server.login(os.environ['SMTP_USER'], os.environ.get('SMTP_PASSWORD', ''))
+                server.login(os.environ['SMTP_USER'], smtp_password())
             server.send_message(msg)
     else:
         with smtplib.SMTP_SSL(host, port, context=ssl.create_default_context(), timeout=30) as server:
             if os.environ.get('SMTP_USER'):
-                server.login(os.environ['SMTP_USER'], os.environ.get('SMTP_PASSWORD', ''))
+                server.login(os.environ['SMTP_USER'], smtp_password())
             server.send_message(msg)
 
 
@@ -86,6 +97,7 @@ def main():
         new.append((title, link))
         print(f'Descargado {identifier}: {title}')
     if new:
+        STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps(sorted(seen), ensure_ascii=False))
         mail(new)
     else:
