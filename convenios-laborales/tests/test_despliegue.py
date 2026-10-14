@@ -6,7 +6,9 @@ debe cumplir el despliegue. La validación real de Compose se hace en CI.
 Requieren PyYAML:  python3 -m pip install pyyaml
 Ejecución:         python3 -m unittest discover -s convenios-laborales/tests -v
 """
+import os
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -135,10 +137,73 @@ class ManifiestoTest(unittest.TestCase):
         self.assertIn('no se ha arrancado nunca con Docker real', texto_crudo())
 
 
+class PrefijoTest(unittest.TestCase):
+    def test_el_proyecto_usa_un_prefijo_configurable(self):
+        self.assertIn('name: ${OPENPACTUM_PREFIJO:-openpactum}', texto_crudo())
+
+    def test_el_prefijo_por_defecto_es_openpactum(self):
+        manifiesto = cargar()
+        self.assertEqual(manifiesto['name'], 'openpactum')
+        for nombre, volumen in manifiesto['volumes'].items():
+            with self.subTest(volumen=nombre):
+                self.assertEqual(volumen['name'], f'openpactum_{nombre}')
+
+    def test_los_volumenes_fijan_su_nombre_de_forma_explicita(self):
+        # Sin `name:` explícito, Compose prefijaría los volúmenes con el nombre del proyecto y
+        # cambiar el prefijo dejaría los datos anteriores huérfanos.
+        crudo = texto_crudo()
+        for nombre in ('redis_datos', 'postgres_datos', 'paperless_datos',
+                       'paperless_media', 'ollama_datos'):
+            with self.subTest(volumen=nombre):
+                self.assertIn(f'name: ${{OPENPACTUM_PREFIJO:-openpactum}}_{nombre}', crudo)
+
+    def test_cambiar_el_prefijo_renombra_proyecto_y_volumenes(self):
+        manifiesto = cargar({'OPENPACTUM_PREFIJO': 'pacto-pruebas'})
+        self.assertEqual(manifiesto['name'], 'pacto-pruebas')
+        self.assertEqual(manifiesto['volumes']['postgres_datos']['name'], 'pacto-pruebas_postgres_datos')
+        self.assertEqual(manifiesto['volumes']['ollama_datos']['name'], 'pacto-pruebas_ollama_datos')
+
+    def test_los_datos_del_host_tambien_son_configurables(self):
+        manifiesto = cargar({'OPENPACTUM_DATOS': '/tmp/openpactum-datos'})
+        montajes = manifiesto['services']['changedetection']['volumes']
+        self.assertEqual(montajes, ['/tmp/openpactum-datos/changedetection:/datastore'])
+
+
+class ValidadorTest(unittest.TestCase):
+    """El script de prueba local de la fase 3."""
+
+    VALIDADOR = DESPLIEGUE / 'validar-despliegue.sh'
+
+    def test_existe_y_es_ejecutable(self):
+        self.assertTrue(self.VALIDADOR.is_file())
+        self.assertTrue(os.access(self.VALIDADOR, os.X_OK))
+
+    def test_sintaxis_posix_correcta(self):
+        self.assertEqual(subprocess.run(['dash', '-n', str(self.VALIDADOR)],
+                                        capture_output=True).returncode, 0)
+
+    def test_documenta_sus_opciones(self):
+        resultado = subprocess.run([str(self.VALIDADOR), '--ayuda'], capture_output=True, text=True)
+        self.assertEqual(resultado.returncode, 0)
+        for opcion in ('--sin-sintaxis', '--sin-pruebas', '--sin-docker'):
+            self.assertIn(opcion, resultado.stdout)
+
+    def test_rechaza_opciones_desconocidas(self):
+        resultado = subprocess.run([str(self.VALIDADOR), '--inventada'], capture_output=True, text=True)
+        self.assertEqual(resultado.returncode, 2)
+
+    def test_comprueba_la_sintaxis_sin_docker(self):
+        resultado = subprocess.run([str(self.VALIDADOR), '--sin-pruebas', '--sin-docker'],
+                                   capture_output=True, text=True, cwd=str(DESPLIEGUE.parent.parent))
+        self.assertEqual(resultado.returncode, 0, resultado.stdout + resultado.stderr)
+        self.assertIn('Sintaxis de los scripts', resultado.stdout)
+
+
 class VariablesTest(unittest.TestCase):
     def test_las_variables_documentadas_aparecen_en_el_ejemplo(self):
         ejemplo = ENV_EJEMPLO.read_text(encoding='utf-8')
-        for variable in ('OPENPACTUM_VERSION', 'OPENPACTUM_PROPIETARIO', 'OPENPACTUM_DATOS',
+        for variable in ('OPENPACTUM_VERSION', 'OPENPACTUM_PROPIETARIO', 'OPENPACTUM_PREFIJO',
+                         'OPENPACTUM_DATOS',
                          'POSTGRES_PASSWORD', 'PAPERLESS_SECRET_KEY', 'USERMAP_UID',
                          'USERMAP_GID', 'MODELO', 'OPENPACTUM_INTERVALO', 'OPENPACTUM_RSS',
                          'SMTP_HOST'):

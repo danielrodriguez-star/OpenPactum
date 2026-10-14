@@ -47,26 +47,31 @@ jobs:
   manifiesto:
     name: Validar manifiesto de Compose
     runs-on: ubuntu-24.04
-    env:
-      # Valores de validación: `docker compose config` comprueba la sintaxis y la
-      # interpolación, pero no arranca ni descarga nada.
-      OPENPACTUM_VERSION: 0.0.0-validacion
-      POSTGRES_PASSWORD: validacion
-      PAPERLESS_SECRET_KEY: validacion
     steps:
       - name: Obtener el código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Comprobar la sintaxis de los scripts
+      # El mismo script que se usa en local: sintaxis de los scripts y validación del
+      # manifiesto con `docker compose config` (no arranca nada).
+      - name: Validar scripts y manifiesto
+        run: convenios-laborales/despliegue/validar-despliegue.sh --sin-pruebas
+
+      # Alcance: los scripts nuevos de despliegue y arranque. Los de scripts/ del host
+      # (fases 1-2) se retiran en la fase 5 y no se tocan aquí.
+      - name: Analizar los scripts con shellcheck
         run: |
           set -euo pipefail
-          for fichero in convenios-laborales/despliegue/*.sh; do
-            [ -e "$fichero" ] || continue
-            dash -n "$fichero"
-            echo "Sin errores de sintaxis: $fichero"
+          scripts=()
+          for fichero in convenios-laborales/despliegue/*.sh convenios-laborales/arranque/*.sh; do
+            if [ -e "$fichero" ]; then
+              scripts+=("$fichero")
+            fi
           done
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "No hay scripts que analizar."
+            exit 0
+          fi
+          shellcheck --severity=warning "${scripts[@]}"
 
-      - name: Validar el manifiesto
-        run: docker compose -f convenios-laborales/despliegue/compose.yaml config -q

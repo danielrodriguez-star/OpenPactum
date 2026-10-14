@@ -9,7 +9,11 @@
 #
 # AVISO: este manifiesto no se ha arrancado nunca con Docker real. La única validación
 # automática es `docker compose config -q` en CI (.github/workflows/despliegue.yml).
-name: openpactum
+
+# Prefijo del proyecto y de los volúmenes: permite varias instalaciones (o una de pruebas) en
+# el mismo equipo sin pisarse. Los nombres de los volúmenes se fijan de forma explícita para
+# que los datos no queden huérfanos si alguien cambia el prefijo.
+name: ${OPENPACTUM_PREFIJO:-openpactum}
 
 # Monitor del BOE y su programador comparten imagen, montajes y variables. El programador
 # sustituye a la tarea cron del host: repite la ejecución cada OPENPACTUM_INTERVALO segundos.
@@ -178,7 +182,12 @@ services:
 
 volumes:
   redis_datos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_redis_datos
   postgres_datos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_postgres_datos
   paperless_datos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_paperless_datos
   paperless_media:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_paperless_media
   ollama_datos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_ollama_datos
