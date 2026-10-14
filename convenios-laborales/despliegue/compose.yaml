@@ -1,0 +1,184 @@
+# Manifiesto de despliegue autónomo de OpenPactum (fase 3).
+#
+# No requiere clonar el repositorio: descargue este fichero (y el resto de la carpeta) y
+# despliegue con, por ejemplo:
+#
+#   docker compose --env-file despliegue/.env -f despliegue/compose.yaml up -d
+#
+# Vea `despliegue/README.md` y `despliegue/.env.example`.
+#
+# AVISO: este manifiesto no se ha arrancado nunca con Docker real. La única validación
+# automática es `docker compose config -q` en CI (.github/workflows/despliegue.yml).
+name: openpactum
+
+# Monitor del BOE y su programador comparten imagen, montajes y variables. El programador
+# sustituye a la tarea cron del host: repite la ejecución cada OPENPACTUM_INTERVALO segundos.
+x-monitor: &monitor
+  image: ghcr.io/${OPENPACTUM_PROPIETARIO:-danielrodriguez-star}/openpactum-monitor:${OPENPACTUM_VERSION:?Defina OPENPACTUM_VERSION con la etiqueta publicada del monitor}
+  restart: "no"
+  # El monitor debe poder escribir donde Paperless lee y retira los PDF (mismo UID/GID que
+  # USERMAP_UID/GID de Paperless). Lo mismo para el estado en /estado.
+  user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"
+  depends_on:
+    datos-init: {condition: service_completed_successfully}
+  environment:
+    OPENPACTUM_ESTADO: /estado/estado-rss.json
+    OPENPACTUM_CONSUME: /consume
+    OPENPACTUM_RSS: ${OPENPACTUM_RSS:-}
+    SMTP_HOST: ${SMTP_HOST:-}
+    SMTP_PORT: ${SMTP_PORT:-}
+    SMTP_FROM: ${SMTP_FROM:-}
+    SMTP_TO: ${SMTP_TO:-}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+  volumes:
+    - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/monitor:/estado
+    - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/consume:/consume
+
+services:
+  # Prepara el árbol de datos del host antes de arrancar el resto: crea los directorios y les
+  # da el propietario y los permisos que necesitan los contenedores que no corren como root.
+  datos-init:
+    image: alpine:3.20
+    restart: "no"
+    environment:
+      USUARIO_UID: ${USERMAP_UID:-1000}
+      USUARIO_GID: ${USERMAP_GID:-1000}
+    volumes:
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}:/datos
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        umask 022
+        mkdir -p /datos/changedetection /datos/paperless/consume /datos/paperless/export \
+                 /datos/anythingllm /datos/monitor/estado
+        chown -R "$USUARIO_UID:$USUARIO_GID" /datos/paperless /datos/anythingllm /datos/monitor
+        chmod 0770 /datos/paperless/consume
+        # AnythingLLM guarda la configuración del asistente en un fichero, no en un directorio.
+        [ -e /datos/anythingllm/.env ] || : > /datos/anythingllm/.env
+        chown "$USUARIO_UID:$USUARIO_GID" /datos/anythingllm/.env
+        echo "Datos preparados en /datos."
+
+  changedetection:
+    image: dgtlmoon/changedetection.io:0.50.14
+    restart: unless-stopped
+    depends_on:
+      datos-init: {condition: service_completed_successfully}
+    ports: ["127.0.0.1:5000:5000"]
+    environment:
+      BASE_URL: http://localhost:5000
+    volumes:
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/changedetection:/datastore
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_datos:/data
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD en despliegue/.env}
+    volumes:
+      - postgres_datos:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperless"]
+      interval: 10s
+      retries: 10
+
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.18.4
+    restart: unless-stopped
+    depends_on:
+      datos-init: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      PAPERLESS_REDIS: redis://redis:6379
+      PAPERLESS_DBHOST: postgres
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_DBPASS: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD en despliegue/.env}
+      PAPERLESS_TIME_ZONE: Europe/Madrid
+      PAPERLESS_OCR_LANGUAGE: spa+eng
+      PAPERLESS_OCR_MODE: redo
+      PAPERLESS_URL: http://localhost:8000
+      PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY:?Defina PAPERLESS_SECRET_KEY en despliegue/.env}
+      # Mismo UID/GID que el usuario del host, para que Paperless pueda leer y retirar los
+      # PDF que deja el monitor en paperless/consume/.
+      USERMAP_UID: ${USERMAP_UID:-1000}
+      USERMAP_GID: ${USERMAP_GID:-1000}
+    volumes:
+      - paperless_datos:/usr/src/paperless/data
+      - paperless_media:/usr/src/paperless/media
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/consume:/usr/src/paperless/consume
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/export:/usr/src/paperless/export
+
+  ollama:
+    image: ollama/ollama:0.9.6
+    restart: unless-stopped
+    volumes:
+      - ollama_datos:/root/.ollama
+    # Sin publicar el puerto: solo los contenedores internos acceden a Ollama.
+
+  modelos:
+    image: ollama/ollama:0.9.6
+    depends_on: [ollama]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      MODELO: ${MODELO:-llama3.1:8b}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ['until ollama list >/dev/null 2>&1; do sleep 3; done; ollama pull "$${MODELO}" && ollama pull nomic-embed-text']
+    restart: "no"
+
+  anythingllm:
+    image: mintplexlabs/anythingllm:1.8.4
+    restart: unless-stopped
+    depends_on:
+      datos-init: {condition: service_completed_successfully}
+      ollama: {condition: service_started}
+    ports: ["127.0.0.1:3001:3001"]
+    # Pendiente de verificar: AnythingLLM pide SYS_ADMIN para su entorno de ejecución.
+    cap_add: [SYS_ADMIN]
+    environment:
+      STORAGE_DIR: /app/server/storage
+      LLM_PROVIDER: ollama
+      OLLAMA_BASE_PATH: http://ollama:11434
+      OLLAMA_MODEL_PREF: ${MODELO:-llama3.1:8b}
+      EMBEDDING_ENGINE: ollama
+      EMBEDDING_MODEL_PREF: nomic-embed-text
+      VECTOR_DB: lancedb
+    volumes:
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/anythingllm:/app/server/storage
+      # Fichero de configuración del asistente inicial (lo crea datos-init).
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/anythingllm/.env:/app/server/.env
+
+  # Ejecución manual: docker compose run --rm monitor
+  monitor:
+    <<: *monitor
+
+  # Programador: repite el monitor cada OPENPACTUM_INTERVALO segundos (6 h por defecto).
+  programador:
+    <<: *monitor
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while :; do
+          python3 /app/monitor-convenios.py || echo 'Aviso: el monitor falló; se reintentará.'
+          sleep ${OPENPACTUM_INTERVALO:-21600}
+        done
+
+volumes:
+  redis_datos:
+  postgres_datos:
+  paperless_datos:
+  paperless_media:
+  ollama_datos:

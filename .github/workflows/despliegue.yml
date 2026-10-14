@@ -1,0 +1,72 @@
+# Pruebas y validación del despliegue autónomo (fase 3).
+#
+# Las pruebas unitarias (incluidas las del manifiesto, que necesitan PyYAML) no requieren
+# Docker. La validación de Compose, en cambio, solo se hace aquí: en el equipo de desarrollo
+# no hay Docker y el manifiesto no se ha arrancado nunca con contenedores reales.
+name: Despliegue
+
+on:
+  pull_request:
+    paths:
+      - 'convenios-laborales/despliegue/**'
+      - 'convenios-laborales/scripts/**'
+      - 'convenios-laborales/tests/**'
+      - '.github/workflows/despliegue.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'convenios-laborales/despliegue/**'
+      - 'convenios-laborales/scripts/**'
+      - 'convenios-laborales/tests/**'
+      - '.github/workflows/despliegue.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: despliegue-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    name: Pruebas unitarias
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar dependencias de prueba
+        run: python3 -m pip install pyyaml
+
+      - name: Ejecutar pruebas
+        run: python3 -m unittest discover -s convenios-laborales/tests -v
+
+  manifiesto:
+    name: Validar manifiesto de Compose
+    runs-on: ubuntu-24.04
+    env:
+      # Valores de validación: `docker compose config` comprueba la sintaxis y la
+      # interpolación, pero no arranca ni descarga nada.
+      OPENPACTUM_VERSION: 0.0.0-validacion
+      POSTGRES_PASSWORD: validacion
+      PAPERLESS_SECRET_KEY: validacion
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Comprobar la sintaxis de los scripts
+        run: |
+          set -euo pipefail
+          for fichero in convenios-laborales/despliegue/*.sh; do
+            [ -e "$fichero" ] || continue
+            dash -n "$fichero"
+            echo "Sin errores de sintaxis: $fichero"
+          done
+
+      - name: Validar el manifiesto
+        run: docker compose -f convenios-laborales/despliegue/compose.yaml config -q

@@ -1,0 +1,162 @@
+"""Pruebas del manifiesto de despliegue autónomo (fase 3).
+
+No requieren Docker: solo leen `despliegue/compose.yaml` y comprueban las invariantes que
+debe cumplir el despliegue. La validación real de Compose se hace en CI.
+
+Requieren PyYAML:  python3 -m pip install pyyaml
+Ejecución:         python3 -m unittest discover -s convenios-laborales/tests -v
+"""
+import re
+import unittest
+from pathlib import Path
+
+import yaml
+
+DESPLIEGUE = Path(__file__).resolve().parent.parent / 'despliegue'
+COMPOSE = DESPLIEGUE / 'compose.yaml'
+ENV_EJEMPLO = DESPLIEGUE / '.env.example'
+
+# Valores presentes para poder interpolar el manifiesto en las pruebas.
+ENTORNO = {
+    'OPENPACTUM_VERSION': '0.0.0-pruebas',
+    'POSTGRES_PASSWORD': 'pruebas',
+    'PAPERLESS_SECRET_KEY': 'pruebas',
+    'USERMAP_UID': '1000',
+    'USERMAP_GID': '1000',
+}
+PATRON_VARIABLE = re.compile(r'\$\{([A-Z_][A-Z0-9_]*)(:[-?])?([^}]*)\}')
+
+
+def interpolar(texto, entorno=None):
+    """Interpolación mínima al estilo de Compose: ${VAR}, ${VAR:-defecto}, ${VAR:?error}."""
+    valores = dict(ENTORNO)
+    valores.update(entorno or {})
+    # En Compose, `$$` escapa un dólar literal (lo consume el shell del contenedor).
+    protegido = texto.replace('$$', '\x00')
+
+    def sustituir(coincidencia):
+        nombre, operador, valor = coincidencia.group(1), coincidencia.group(2), coincidencia.group(3)
+        if nombre in valores:
+            return valores[nombre]
+        if operador == ':-':
+            return valor
+        raise AssertionError(f'Falta la variable {nombre} para interpolar el manifiesto')
+
+    return PATRON_VARIABLE.sub(sustituir, protegido).replace('\x00', '$')
+
+
+def cargar(entorno=None):
+    return yaml.safe_load(interpolar(COMPOSE.read_text(encoding='utf-8'), entorno))
+
+
+def texto_crudo():
+    return COMPOSE.read_text(encoding='utf-8')
+
+
+class ManifiestoTest(unittest.TestCase):
+    def setUp(self):
+        self.manifiesto = cargar()
+        self.servicios = self.manifiesto['services']
+
+    def test_define_todos_los_servicios_de_la_pila(self):
+        self.assertEqual(
+            sorted(self.servicios),
+            ['anythingllm', 'changedetection', 'datos-init', 'modelos', 'monitor',
+             'ollama', 'paperless', 'postgres', 'programador', 'redis'],
+        )
+
+    def test_no_usa_la_clave_version_obsoleta(self):
+        self.assertNotIn('version', self.manifiesto)
+
+    def test_ninguna_imagen_usa_la_etiqueta_latest(self):
+        for nombre, servicio in self.servicios.items():
+            with self.subTest(servicio=nombre):
+                self.assertNotRegex(servicio['image'], r':latest$')
+
+    def test_los_puertos_se_publican_solo_en_localhost(self):
+        publicados = [puerto for servicio in self.servicios.values()
+                      for puerto in servicio.get('ports', [])]
+        self.assertTrue(publicados)
+        for puerto in publicados:
+            with self.subTest(puerto=puerto):
+                self.assertTrue(puerto.startswith('127.0.0.1:'), puerto)
+
+    def test_ningun_servicio_publica_ollama(self):
+        self.assertNotIn('ports', self.servicios['ollama'])
+
+    def test_postgres_espera_al_healthcheck_antes_de_paperless(self):
+        self.assertIn('healthcheck', self.servicios['postgres'])
+        dependencia = self.servicios['paperless']['depends_on']['postgres']
+        self.assertEqual(dependencia['condition'], 'service_healthy')
+
+    def test_datos_init_termina_antes_que_los_servicios_que_montan_datos(self):
+        for nombre in ('changedetection', 'paperless', 'anythingllm', 'monitor', 'programador'):
+            with self.subTest(servicio=nombre):
+                dependencia = self.servicios[nombre]['depends_on']['datos-init']
+                self.assertEqual(dependencia['condition'], 'service_completed_successfully')
+
+    def test_el_estado_del_monitor_no_vive_en_el_sistema_de_ficheros_del_contenedor(self):
+        entorno = self.servicios['monitor']['environment']
+        self.assertEqual(entorno['OPENPACTUM_ESTADO'], '/estado/estado-rss.json')
+        self.assertEqual(entorno['OPENPACTUM_CONSUME'], '/consume')
+
+    def test_el_monitor_escribe_con_el_mismo_usuario_que_paperless(self):
+        # Ambos leen el mismo UID/GID, de forma que el monitor puede dejar PDF en el
+        # directorio que Paperless comparte y retira.
+        self.assertIn('user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"', texto_crudo())
+        self.assertIn('USERMAP_UID: ${USERMAP_UID:-1000}', texto_crudo())
+        self.assertEqual(self.servicios['monitor']['user'], '1000:1000')
+        self.assertEqual(str(self.servicios['paperless']['environment']['USERMAP_UID']), '1000')
+
+    def test_el_programador_repite_el_monitor_cada_seis_horas(self):
+        programador = self.servicios['programador']
+        self.assertEqual(programador['restart'], 'unless-stopped')
+        orden = programador['command'][0]
+        # 21600 s = 6 h, la misma cadencia que la tarea cron del host.
+        self.assertIn('sleep 21600', orden)
+        self.assertIn('monitor-convenios.py', orden)
+        self.assertIn('sleep ${OPENPACTUM_INTERVALO:-21600}', texto_crudo())
+
+    def test_el_monitor_de_ejecucion_manual_no_se_reinicia_solo(self):
+        self.assertEqual(self.servicios['monitor']['restart'], 'no')
+
+    def test_los_servicios_de_ejecucion_unica_no_se_reinician(self):
+        for nombre in ('datos-init', 'modelos'):
+            with self.subTest(servicio=nombre):
+                self.assertEqual(self.servicios[nombre]['restart'], 'no')
+
+    def test_no_hay_nombres_de_contenedor_fijados(self):
+        # container_name impide que el prefijo del proyecto se aplique y dificulta las copias.
+        for nombre, servicio in self.servicios.items():
+            with self.subTest(servicio=nombre):
+                self.assertNotIn('container_name', servicio)
+
+    def test_el_manifiesto_avisa_de_que_no_se_ha_probado_con_docker(self):
+        self.assertIn('no se ha arrancado nunca con Docker real', texto_crudo())
+
+
+class VariablesTest(unittest.TestCase):
+    def test_las_variables_documentadas_aparecen_en_el_ejemplo(self):
+        ejemplo = ENV_EJEMPLO.read_text(encoding='utf-8')
+        for variable in ('OPENPACTUM_VERSION', 'OPENPACTUM_PROPIETARIO', 'OPENPACTUM_DATOS',
+                         'POSTGRES_PASSWORD', 'PAPERLESS_SECRET_KEY', 'USERMAP_UID',
+                         'USERMAP_GID', 'MODELO', 'OPENPACTUM_INTERVALO', 'OPENPACTUM_RSS',
+                         'SMTP_HOST'):
+            with self.subTest(variable=variable):
+                self.assertRegex(ejemplo, rf'(?m)^{re.escape(variable)}=')
+
+    def test_las_variables_obligatorias_estan_marcadas_como_tales(self):
+        crudo = texto_crudo()
+        for variable in ('OPENPACTUM_VERSION', 'POSTGRES_PASSWORD', 'PAPERLESS_SECRET_KEY'):
+            with self.subTest(variable=variable):
+                self.assertIn(f'${{{variable}:?', crudo)
+
+    def test_el_ejemplo_no_contiene_secretos_reales(self):
+        ejemplo = ENV_EJEMPLO.read_text(encoding='utf-8')
+        for linea in ejemplo.splitlines():
+            if linea.startswith(('POSTGRES_PASSWORD=', 'PAPERLESS_SECRET_KEY=')):
+                self.assertRegex(linea, r'=CAMBIAR_CON_')
+
+
+if __name__ == '__main__':
+    unittest.main()
