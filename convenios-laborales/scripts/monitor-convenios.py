@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vigila el RSS del BOE, descarga PDFs oficiales y envía avisos SMTP."""
+"""Vigila el canal RSS de convenios colectivos del BOE, descarga PDFs oficiales y avisa por SMTP."""
 import json
 import os
 import re
@@ -19,7 +19,11 @@ ROOT = Path(__file__).resolve().parent.parent
 # Por defecto se mantienen las rutas de la instalación con checkout.
 STATE = Path(os.environ.get('OPENPACTUM_ESTADO') or ROOT / 'scripts/.estado-rss.json')
 CONSUME = Path(os.environ.get('OPENPACTUM_CONSUME') or ROOT / 'paperless/consume')
-RSS = 'https://www.boe.es/rss/c.php?f=disposiciones&c=221'
+# Canal temático oficial de convenios colectivos del BOE (publica los convenios de los dos
+# últimos meses). Sustituye al canal genérico de disposiciones, que obligaba a filtrar entre
+# toda la producción normativa del día. Puede apuntarse a otro canal con OPENPACTUM_RSS, pero
+# entonces el filtro por «convenio colectivo» de main() sigue actuando como red de seguridad.
+RSS = os.environ.get('OPENPACTUM_RSS') or 'https://www.boe.es/rss/canal.php?c=ccolectivos'
 USER_AGENT = 'OpenPactum/1.0 (vigilancia de convenios)'
 
 
@@ -71,6 +75,8 @@ def main():
     for item in root.findall('.//item'):
         title = (item.findtext('title') or '').strip()
         description = ' '.join(item.itertext())
+        # Red de seguridad: el canal por defecto solo publica convenios, pero con OPENPACTUM_RSS
+        # puede apuntarse a un canal más amplio (por ejemplo, el de disposiciones generales).
         if 'convenio colectivo' not in (title + ' ' + description).lower():
             continue
         link = (item.findtext('link') or '').strip()

@@ -1,0 +1,77 @@
+# Pruebas y validación del despliegue autónomo (fase 3).
+#
+# Las pruebas unitarias (incluidas las del manifiesto, que necesitan PyYAML) no requieren
+# Docker. La validación de Compose, en cambio, solo se hace aquí: en el equipo de desarrollo
+# no hay Docker y el manifiesto no se ha arrancado nunca con contenedores reales.
+name: Despliegue
+
+on:
+  pull_request:
+    paths:
+      - 'convenios-laborales/despliegue/**'
+      - 'convenios-laborales/scripts/**'
+      - 'convenios-laborales/tests/**'
+      - '.github/workflows/despliegue.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'convenios-laborales/despliegue/**'
+      - 'convenios-laborales/scripts/**'
+      - 'convenios-laborales/tests/**'
+      - '.github/workflows/despliegue.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: despliegue-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    name: Pruebas unitarias
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Instalar dependencias de prueba
+        run: python3 -m pip install pyyaml
+
+      - name: Ejecutar pruebas
+        run: python3 -m unittest discover -s convenios-laborales/tests -v
+
+  manifiesto:
+    name: Validar manifiesto de Compose
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # El mismo script que se usa en local: sintaxis de los scripts y validación del
+      # manifiesto con `docker compose config` (no arranca nada).
+      - name: Validar scripts y manifiesto
+        run: convenios-laborales/despliegue/validar-despliegue.sh --sin-pruebas
+
+      # Alcance: los scripts nuevos de despliegue y arranque. Los de scripts/ del host
+      # (fases 1-2) se retiran en la fase 5 y no se tocan aquí.
+      - name: Analizar los scripts con shellcheck
+        run: |
+          set -euo pipefail
+          scripts=()
+          for fichero in convenios-laborales/despliegue/*.sh convenios-laborales/arranque/*.sh; do
+            if [ -e "$fichero" ]; then
+              scripts+=("$fichero")
+            fi
+          done
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "No hay scripts que analizar."
+            exit 0
+          fi
+          shellcheck --severity=warning "${scripts[@]}"
+

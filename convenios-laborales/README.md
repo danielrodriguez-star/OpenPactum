@@ -2,6 +2,16 @@
 
 **Estado:** el instalador y la configuración se han validado sin Docker (sintaxis, `shellcheck`, esquema de Compose y simulación del instalador); **no se han probado todavía en una máquina con Docker**. No se garantiza cumplimiento RGPD por instalar software: evalúe además acceso, copias, retención y proveedor SMTP.
 
+## Dos formas de instalar
+
+- **Despliegue autónomo (fases 3-4, sin probar con Docker)**: [despliegue/README.md](despliegue/README.md).
+  No requiere clonar el repositorio, los secretos se generan en un volumen gestionado por
+  `secretos-init`, el programador sustituye a la tarea cron y hay un contenedor de arranque que lo
+  hace todo con un solo comando. Pendientes en
+  [docs/INVENTARIO-FASE-5.md](docs/INVENTARIO-FASE-5.md).
+- **Instalación con checkout (la probada hasta ahora)**: las secciones siguientes, con
+  `instalar.sh`. Se retira en la fase 5.
+
 ## Instalación automática (Debian/Ubuntu)
 
 Copie **esta carpeta** a su equipo (por ejemplo, `~/convenios-laborales/`) y ejecute con su usuario normal, **sin sudo** (la pedirá cuando haga falta):
@@ -46,13 +56,13 @@ Estructura: `changedetection/`, `paperless/consume/`, `paperless/export/`, `anyt
 
 ## Accesos y activación
 
-- Changedetection: http://localhost:5000 — añada allí las dos URLs de `scripts/fuentes-rss.txt` (REGCON es web, no RSS) y las URL de sus boletines provinciales. Ajuste filtros por convenio y selectores para reducir falsos avisos. Configure notificaciones en la interfaz con una URL Apprise `mailto://USUARIO:CLAVE@SERVIDOR:587/?to=DESTINO&from=ORIGEN`; codifique caracteres especiales de usuario/clave y utilice TLS según su servidor. Guarde la URL solo en la interfaz local; proteja el acceso. Sin SMTP no hay alertas de Changedetection.
+- Changedetection: http://localhost:5000 — añada allí las fuentes que el monitor no cubre (REGCON es web, no RSS; vea `scripts/fuentes-rss.txt`) y las URL de sus boletines provinciales. Ajuste filtros por convenio y selectores para reducir falsos avisos. Configure notificaciones en la interfaz con una URL Apprise `mailto://USUARIO:CLAVE@SERVIDOR:587/?to=DESTINO&from=ORIGEN`; codifique caracteres especiales de usuario/clave y utilice TLS según su servidor. Guarde la URL solo en la interfaz local; proteja el acceso. Sin SMTP no hay alertas de Changedetection.
 - Paperless: http://localhost:8000 — con `instalar.sh` el administrador y las etiquetas ya están creados (credenciales en `credenciales.txt`). En instalación manual, cree el administrador con `docker compose exec paperless python manage.py createsuperuser`; en Perfil → tokens API obtenga token y ejecute `PAPERLESS_TOKEN='...' ./scripts/crear-etiquetas.sh`. El OCR español/inglés se aplica automáticamente a PDFs colocados en `paperless/consume/`; compruebe que hay texto extraído. La carpeta `consume/` es local al host y Paperless retira ficheros al procesarlos.
 - AnythingLLM: http://localhost:3001 — configure Ollama en `http://ollama:11434`, modelo indicado en `.env`, embeddings `nomic-embed-text` y LanceDB. Complete el asistente inicial. Cree clave API en AnythingLLM, copie `scripts/convenios.txt.example` a `scripts/convenios.txt`, una línea por convenio, y ejecute `ANYTHINGLLM_API_KEY='...' ./scripts/crear-workspaces.sh`. Suba manualmente el PDF del convenio desde Paperless (descárguelo o exporte) a su workspace, **insértelo en el contexto** y pregunte citando artículo y versión; valide siempre contra el texto oficial. Paperless y AnythingLLM no sincronizan documentos automáticamente.
 
 ## Monitor del BOE y correo
 
-Copie `scripts/config-email.env.example` a `scripts/config-email.env`, rellene servidor SMTP, credenciales y destinatario y `chmod 600 scripts/config-email.env`. Para TLS implícito use puerto 465 y `SMTP_STARTTLS=false`; para STARTTLS, puerto 587 y `true`. Use SMTP autohospedado si desea evitar un tercero. Ejecute primero `./scripts/monitor-convenios.sh`: procesa entradas nuevas del feed que contengan «convenio colectivo», descarga PDFs oficiales a `paperless/consume/`, comprueba su firma y mantiene estado en `scripts/.estado-rss.json`; no compara versiones ni interpreta jurídicamente el cambio. Luego `./scripts/instalar-cron.sh` instala la ejecución cada seis horas (`instalar.sh` ya lo hace salvo con `--sin-cron`); vea `scripts/monitor.log`. Si SMTP no está configurado se registra la novedad localmente, sin correo; configure SMTP **antes** de la primera ejecución si necesita recibir todas las alertas. El RSS puede no incluir toda la historia ni todos los boletines provinciales: Changedetection supervisa las fuentes adicionales que configure manualmente.
+Copie `scripts/config-email.env.example` a `scripts/config-email.env`, rellene servidor SMTP, credenciales y destinatario y `chmod 600 scripts/config-email.env`. Para TLS implícito use puerto 465 y `SMTP_STARTTLS=false`; para STARTTLS, puerto 587 y `true`. Use SMTP autohospedado si desea evitar un tercero. Ejecute primero `./scripts/monitor-convenios.sh`: lee el canal temático de convenios colectivos del BOE (https://www.boe.es/rss/canal.php?c=ccolectivos, que publica los convenios de los dos últimos meses; puede cambiarse con `OPENPACTUM_RSS`), descarga los PDFs oficiales a `paperless/consume/`, comprueba su firma y mantiene estado en `scripts/.estado-rss.json`; no compara versiones ni interpreta jurídicamente el cambio. Luego `./scripts/instalar-cron.sh` instala la ejecución cada seis horas (`instalar.sh` ya lo hace salvo con `--sin-cron`); vea `scripts/monitor.log`. Si SMTP no está configurado se registra la novedad localmente, sin correo; configure SMTP **antes** de la primera ejecución si necesita recibir todas las alertas. El RSS puede no incluir toda la historia ni todos los boletines provinciales: Changedetection supervisa las fuentes adicionales que configure manualmente.
 
 ## Comparación de versiones
 

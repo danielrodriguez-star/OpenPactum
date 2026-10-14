@@ -1,0 +1,206 @@
+# Manifiesto de despliegue autónomo de OpenPactum (fase 3).
+#
+# No requiere clonar el repositorio: descargue este fichero (y el resto de la carpeta) y
+# despliegue con, por ejemplo:
+#
+#   docker compose --env-file despliegue/.env -f despliegue/compose.yaml up -d
+#
+# Vea `despliegue/README.md` y `despliegue/.env.example`.
+#
+# AVISO: este manifiesto no se ha arrancado nunca con Docker real. La única validación
+# automática es `docker compose config -q` en CI (.github/workflows/despliegue.yml).
+# Los pendientes (digests, cap_add de AnythingLLM, etc.) están en docs/INVENTARIO-FASE-5.md.
+
+# Prefijo del proyecto y de los volúmenes: permite varias instalaciones (o una de pruebas) en
+# el mismo equipo sin pisarse. Los nombres de los volúmenes se fijan de forma explícita para
+# que los datos no queden huérfanos si alguien cambia el prefijo.
+name: ${OPENPACTUM_PREFIJO:-openpactum}
+
+# Monitor del BOE y su programador comparten imagen, montajes y variables. El programador
+# sustituye a la tarea cron del host: repite la ejecución cada OPENPACTUM_INTERVALO segundos.
+x-monitor: &monitor
+  image: ghcr.io/${OPENPACTUM_PROPIETARIO:-danielrodriguez-star}/openpactum-monitor:${OPENPACTUM_VERSION:?Defina OPENPACTUM_VERSION con la etiqueta publicada del monitor}
+  restart: "no"
+  # El monitor debe poder escribir donde Paperless lee y retira los PDF (mismo UID/GID que
+  # USERMAP_UID/GID de Paperless). Lo mismo para el estado en /estado.
+  user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"
+  depends_on:
+    secretos-init: {condition: service_completed_successfully}
+  environment:
+    OPENPACTUM_ESTADO: /estado/estado-rss.json
+    OPENPACTUM_CONSUME: /consume
+    OPENPACTUM_RSS: ${OPENPACTUM_RSS:-}
+    SMTP_HOST: ${SMTP_HOST:-}
+    SMTP_PORT: ${SMTP_PORT:-}
+    SMTP_FROM: ${SMTP_FROM:-}
+    SMTP_TO: ${SMTP_TO:-}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+    # Si usa el secreto del volumen: SMTP_PASSWORD_FILE=/run/secretos/smtp_password
+    SMTP_PASSWORD_FILE: ${SMTP_PASSWORD_FILE:-}
+  volumes:
+    - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/monitor:/estado
+    - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/consume:/consume
+    - secretos:/run/secretos:ro
+
+services:
+  # Genera los secretos que falten (en su propio volumen), los proyecta y prepara el árbol de
+  # datos del host antes de arrancar el resto. Es idempotente: no sobrescribe secretos ya
+  # existentes ni pisa datos.
+  secretos-init:
+    image: alpine:3.20
+    restart: "no"
+    user: "0:0"
+    environment:
+      USUARIO_UID: ${USERMAP_UID:-1000}
+      USUARIO_GID: ${USERMAP_GID:-1000}
+    volumes:
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}:/datos
+      - secretos:/secretos
+      - ${OPENPACTUM_DESPLEGUE:-.}/secretos-init.sh:/usr/local/lib/openpactum/secretos-init.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/lib/openpactum/secretos-init.sh"]
+
+  changedetection:
+    image: dgtlmoon/changedetection.io:0.50.14
+    restart: unless-stopped
+    depends_on:
+      secretos-init: {condition: service_completed_successfully}
+    ports: ["127.0.0.1:5000:5000"]
+    environment:
+      BASE_URL: http://localhost:5000
+    volumes:
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/changedetection:/datastore
+
+  redis:
+    # Pendiente (fase 5): fijar una etiqueta concreta en vez de la rama 7-alpine.
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_datos:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: paperless
+      POSTGRES_USER: paperless
+      # La imagen oficial admite leer la contraseña de un fichero.
+      POSTGRES_PASSWORD_FILE: /run/secretos/postgres_password
+    volumes:
+      - postgres_datos:/var/lib/postgresql/data
+      - secretos:/run/secretos:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperless"]
+      interval: 10s
+      retries: 10
+
+  paperless:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.18.4
+    restart: unless-stopped
+    depends_on:
+      secretos-init: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    ports: ["127.0.0.1:8000:8000"]
+    environment:
+      PAPERLESS_REDIS: redis://redis:6379
+      PAPERLESS_DBHOST: postgres
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      PAPERLESS_TIME_ZONE: Europe/Madrid
+      PAPERLESS_OCR_LANGUAGE: spa+eng
+      PAPERLESS_OCR_MODE: redo
+      PAPERLESS_URL: http://localhost:8000
+      # Mismo UID/GID que el usuario del host, para que Paperless pueda leer y retirar los
+      # PDF que deja el monitor en paperless/consume/.
+      USERMAP_UID: ${USERMAP_UID:-1000}
+      USERMAP_GID: ${USERMAP_GID:-1000}
+    # Paperless no admite el convenio *_FILE: secretos-init proyecta los valores del volumen
+    # en este fichero (0640, grupo USERMAP_GID) y Compose lo carga al arrancar. Si el fichero
+    # no existe todavía (primer arranque), ejecute antes `run --rm --no-deps secretos-init`.
+    env_file:
+      - path: ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/secretos/paperless.env
+        required: false
+    volumes:
+      - paperless_datos:/usr/src/paperless/data
+      - paperless_media:/usr/src/paperless/media
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/consume:/usr/src/paperless/consume
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/export:/usr/src/paperless/export
+
+  ollama:
+    image: ollama/ollama:0.9.6
+    restart: unless-stopped
+    volumes:
+      - ollama_datos:/root/.ollama
+    # Sin publicar el puerto: solo los contenedores internos acceden a Ollama.
+
+  modelos:
+    image: ollama/ollama:0.9.6
+    depends_on:
+      ollama: {condition: service_started}
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      # Una sola variable (OPENPACTUM_MODELO) elige el modelo de conversación en toda la pila;
+      # el de embeddings es fijo (nomic-embed-text).
+      OPENPACTUM_MODELO: ${OPENPACTUM_MODELO:-llama3.1:8b}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ['until ollama list >/dev/null 2>&1; do sleep 3; done; ollama pull "$${OPENPACTUM_MODELO}" && ollama pull nomic-embed-text']
+    restart: "no"
+
+  anythingllm:
+    image: mintplexlabs/anythingllm:1.8.4
+    restart: unless-stopped
+    depends_on:
+      secretos-init: {condition: service_completed_successfully}
+      ollama: {condition: service_started}
+    ports: ["127.0.0.1:3001:3001"]
+    # Pendiente de verificar: AnythingLLM pide SYS_ADMIN para su entorno de ejecución.
+    cap_add: [SYS_ADMIN]
+    environment:
+      STORAGE_DIR: /app/server/storage
+      LLM_PROVIDER: ollama
+      OLLAMA_BASE_PATH: http://ollama:11434
+      OLLAMA_MODEL_PREF: ${OPENPACTUM_MODELO:-llama3.1:8b}
+      EMBEDDING_ENGINE: ollama
+      EMBEDDING_MODEL_PREF: nomic-embed-text
+      VECTOR_DB: lancedb
+    volumes:
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/anythingllm:/app/server/storage
+      # Fichero de configuración del asistente inicial (lo crea secretos-init).
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/anythingllm/.env:/app/server/.env
+
+  # Ejecución manual: docker compose run --rm monitor
+  monitor:
+    <<: *monitor
+
+  # Programador: repite el monitor cada OPENPACTUM_INTERVALO segundos (6 h por defecto).
+  programador:
+    <<: *monitor
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while :; do
+          python3 /app/monitor-convenios.py || echo 'Aviso: el monitor falló; se reintentará.'
+          sleep ${OPENPACTUM_INTERVALO:-21600}
+        done
+
+volumes:
+  # Secretos generados por secretos-init. Este es el único sitio donde viven.
+  secretos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_secretos
+  redis_datos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_redis_datos
+  postgres_datos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_postgres_datos
+  paperless_datos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_paperless_datos
+  paperless_media:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_paperless_media
+  ollama_datos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_ollama_datos
