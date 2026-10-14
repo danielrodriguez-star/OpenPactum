@@ -11,6 +11,10 @@ from pathlib import Path
 from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parent.parent / 'scripts' / 'monitor-convenios.py'
+FUENTES = Path(__file__).resolve().parent.parent / 'scripts' / 'fuentes-rss.txt'
+CANAL_BOE = 'https://www.boe.es/rss/canal.php?c=ccolectivos'
+# Respuesta del canal temático de convenios del BOE. El tercer elemento no es un convenio y
+# no debería estar en el canal: sirve para comprobar la red de seguridad del filtro.
 RSS_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel>
   <item>
@@ -71,6 +75,19 @@ class RutasTest(unittest.TestCase):
             })
             self.assertEqual(m.STATE, Path(tmp) / 'estado' / 'rss.json')
             self.assertEqual(m.CONSUME, Path(tmp) / 'consume')
+
+
+class CanalTest(unittest.TestCase):
+    def test_usa_el_canal_de_convenios_colectivos_del_boe(self):
+        m = cargar_modulo({'OPENPACTUM_RSS': None})
+        self.assertEqual(m.RSS, CANAL_BOE)
+
+    def test_canal_configurable_por_entorno(self):
+        m = cargar_modulo({'OPENPACTUM_RSS': 'https://boletin.ejemplo.test/rss.xml'})
+        self.assertEqual(m.RSS, 'https://boletin.ejemplo.test/rss.xml')
+
+    def test_el_canal_por_defecto_esta_documentado_en_fuentes_rss(self):
+        self.assertIn(CANAL_BOE, FUENTES.read_text(encoding='utf-8'))
 
 
 class ContrasenaSmtpTest(unittest.TestCase):

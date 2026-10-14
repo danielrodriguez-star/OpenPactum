@@ -1,4 +1,5 @@
-https://www.boe.es/rss/c.php?f=disposiciones&c=221
+# Canal temático de convenios colectivos del BOE (lo usa el monitor por defecto).
+https://www.boe.es/rss/canal.php?c=ccolectivos
 https://expinterweb.mites.gob.es/regcon/
 # Boletines provinciales: añada una URL por línea debajo.
 # IMPORTANTE: REGCON es una página web, no un feed RSS.
