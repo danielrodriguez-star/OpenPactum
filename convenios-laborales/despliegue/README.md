@@ -51,10 +51,10 @@ ficheros auxiliares se pueden descargar sueltos y ejecutar en cualquier equipo c
    Los arranques siguientes ya son un solo comando (`up -d`).
 
 Los puertos se publican **solo en `127.0.0.1`**: Changedetection en 5000, Paperless en 8000 y
-AnythingLLM en 3001. Ollama no publica puerto. El servicio `datos-init` prepara el árbol de datos
-(directorios, propietario y permisos) antes de arrancar el resto; el resto de pasos manuales de la
-instalación con `instalar.sh` (crear el administrador de Paperless, etiquetas, asistente de
-AnythingLLM, SMTP) siguen siendo manuales y están descritos en el
+AnythingLLM en 3001. Ollama no publica puerto. El servicio `secretos-init` prepara los secretos y el
+árbol de datos del host (directorios, propietario y permisos) antes de arrancar el resto; el resto
+de pasos manuales de la instalación con `instalar.sh` (crear el administrador de Paperless,
+etiquetas, asistente de AnythingLLM, SMTP) siguen siendo manuales y están descritos en el
 [README de la instalación](../README.md).
 
 ### Prefijo del proyecto
@@ -97,6 +97,49 @@ que se crearon los secretos).
 - `monitor`: ejecución manual, `docker compose run --rm monitor`.
 - Los avisos por correo se configuran con `SMTP_*` en el fichero de entorno; sin `SMTP_HOST` el
   monitor solo deja constancia en el log del contenedor.
+
+## Arranque con un solo comando (fase 4)
+
+La imagen `openpactum-arranque` hace todo lo anterior por usted: descarga el manifiesto del
+repositorio y lo verifica contra el hash que lleva dentro, coloca el script de secretos, crea el
+fichero de entorno a partir del ejemplo, prepara secretos y datos y arranca la pila.
+
+```bash
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /var/lib/openpactum:/var/lib/openpactum \
+  ghcr.io/danielrodriguez-star/openpactum-arranque:0.1.0 arriba
+```
+
+Tres cosas que no se pueden olvidar en esa orden:
+
+- El socket de Docker, porque es el motor del host el que despliega la pila.
+- El directorio de trabajo **con la misma ruta absoluta** dentro y fuera del contenedor
+  (`/var/lib/openpactum`): los montajes del manifiesto los resuelve el host, así que la ruta tiene
+  que significar lo mismo en los dos lados.
+- `-it` solo hace falta para las órdenes que siguen la salida (`registros`).
+
+**Riesgo asumido:** montar `/var/run/docker.sock` equivale a dar **control total del equipo
+anfitrión** a ese contenedor (puede arrancar cualquier imagen como root en el host). Úselo en un
+equipo de confianza, no exponga el socket a la red y revise la imagen que ejecuta.
+
+Órdenes disponibles: `arriba` (por defecto), `abajo`, `estado`, `registros`, `monitor`,
+`actualizar`, `version` y `ayuda`. Se pueden cambiar con variables de entorno: `OPENPACTUM_RAIZ`
+(directorio de trabajo), `OPENPACTUM_VERSION` (etiqueta de la imagen del monitor; por defecto, la
+de la propia imagen de arranque) y `USERMAP_UID`/`USERMAP_GID`.
+
+Para construirla a mano (el contexto de construcción es `convenios-laborales/`):
+
+```bash
+docker build -f convenios-laborales/arranque/Dockerfile \
+  --build-arg OPENPACTUM_VERSION=0.1.0 \
+  --build-arg OPENPACTUM_URL_MANIFIESTO=https://raw.githubusercontent.com/danielrodriguez-star/OpenPactum/0.1.0/convenios-laborales/despliegue/compose.yaml \
+  --build-arg OPENPACTUM_COMPOSE_SHA256="$(sha256sum convenios-laborales/despliegue/compose.yaml | cut -d' ' -f1)" \
+  -t openpactum-arranque:0.1.0 convenios-laborales
+```
+
+**Todavía no hay imagen publicada**: sin la variable de repositorio `COMPOSE_SHA256` el flujo de CI
+no la construye. La validación con Docker real de este contenedor sigue pendiente.
 
 ## Prueba local
 

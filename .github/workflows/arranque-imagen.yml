@@ -1,0 +1,115 @@
+# Imagen del contenedor de arranque (fase 4).
+#
+# Solo se construye y publica si el repositorio define la variable COMPOSE_SHA256 con el hash
+# del manifiesto vigente (despliegue/compose.yaml): la imagen lleva ese hash dentro y lo
+# verifica al descargar el manifiesto. Sin la variable no hay imagen de arranque.
+#
+# En un pull request no se publica nada; además, si el manifiesto cambia, el trabajo avisa del
+# hash nuevo para actualizar la variable después de fusionar.
+name: Imagen de arranque
+
+on:
+  pull_request:
+    paths:
+      - 'convenios-laborales/arranque/**'
+      - 'convenios-laborales/despliegue/**'
+      - '.github/workflows/arranque-imagen.yml'
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths:
+      - 'convenios-laborales/arranque/**'
+      - 'convenios-laborales/despliegue/**'
+      - '.github/workflows/arranque-imagen.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arranque-imagen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hash:
+    name: Comprobar COMPOSE_SHA256
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Comparar el manifiesto con la variable del repositorio
+        env:
+          ESPERADO: ${{ vars.COMPOSE_SHA256 }}
+        run: |
+          set -euo pipefail
+          real=$(sha256sum convenios-laborales/despliegue/compose.yaml | cut -d' ' -f1)
+          echo "Hash del manifiesto: $real"
+          if [ -z "$ESPERADO" ]; then
+            echo "::warning::La variable de repositorio COMPOSE_SHA256 no está definida: la imagen de arranque no se construye hasta que lo esté."
+            exit 0
+          fi
+          if [ "$ESPERADO" != "$real" ]; then
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "::warning::COMPOSE_SHA256 no coincide con el manifiesto de esta rama. Tras fusionar, actualice la variable a: $real"
+            else
+              echo "::error::COMPOSE_SHA256 ($ESPERADO) no coincide con el manifiesto ($real). Actualice la variable del repositorio antes de publicar."
+              exit 1
+            fi
+          fi
+
+  imagen:
+    name: Construir y publicar imagen de arranque
+    needs: hash
+    if: vars.COMPOSE_SHA256 != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Preparar Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Calcular etiquetas
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/openpactum-arranque
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Iniciar sesión en GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # La referencia del manifiesto se fija al mismo commit o etiqueta que la imagen, de forma
+      # que la URL y el hash que lleva dentro la imagen correspondan al mismo contenido.
+      - name: Construir (y publicar si no es un pull request)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: convenios-laborales
+          file: convenios-laborales/arranque/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            OPENPACTUM_VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+            OPENPACTUM_URL_MANIFIESTO=https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_type == 'tag' && github.ref_name || github.sha }}/convenios-laborales/despliegue/compose.yaml
+            OPENPACTUM_COMPOSE_SHA256=${{ vars.COMPOSE_SHA256 }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
