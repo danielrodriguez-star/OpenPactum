@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -136,6 +137,8 @@ class FlujoTest(unittest.TestCase):
             # Segunda ejecución: no vuelve a descargar lo ya procesado.
             urls2 = self._ejecutar(m)
             self.assertEqual([u for u in urls2 if u.endswith('.pdf')], [])
+            estado_modificado = (Path(tmp) / 'estado' / 'rss.json').stat().st_mtime
+            self.assertGreater(estado_modificado, 0)
 
     def test_rechaza_respuesta_que_no_es_pdf(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -146,6 +149,18 @@ class FlujoTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 self._ejecutar(m, pdf_bytes=b'<html>error</html>')
             self.assertEqual(list((Path(tmp) / 'consume').glob('*.pdf')), [])
+
+    def test_actualiza_fecha_del_estado_en_una_ejecucion_sin_novedades(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            m = cargar_modulo({
+                'OPENPACTUM_ESTADO': str(Path(tmp) / 'rss.json'),
+                'OPENPACTUM_CONSUME': str(Path(tmp) / 'consume'),
+            })
+            self._ejecutar(m)
+            estado = Path(tmp) / 'rss.json'
+            os.utime(estado, (1, 1))
+            self._ejecutar(m)
+            self.assertGreater(estado.stat().st_mtime, 1)
 
 
 if __name__ == '__main__':

@@ -15,11 +15,13 @@
 #   printf '%s' 'clave' | docker compose --env-file .env run --rm -T --no-deps secretos-init escribir smtp_password
 #
 # Rutas (sobreescribibles para las pruebas):
-#   OPENPACTUM_SECRETOS_DIR  volumen de secretos        (por defecto /secretos)
-#   OPENPACTUM_DATOS_DIR     datos del host             (por defecto /datos)
+#   OPENPACTUM_SECRETOS_DIR        volumen general de secretos (por defecto /secretos)
+#   OPENPACTUM_SECRETOS_ADMIN_DIR  volumen de clave admin      (por defecto /secretos-admin)
+#   OPENPACTUM_DATOS_DIR           datos del host               (por defecto /datos)
 set -eu
 
 SECRETOS=${OPENPACTUM_SECRETOS_DIR:-/secretos}
+SECRETOS_ADMIN=${OPENPACTUM_SECRETOS_ADMIN_DIR:-/secretos-admin}
 DATOS=${OPENPACTUM_DATOS_DIR:-/datos}
 USUARIO_UID=${USERMAP_UID:-1000}
 USUARIO_GID=${USERMAP_GID:-1000}
@@ -40,8 +42,11 @@ avisar_sin_root() {
 }
 
 generar() {
-  # $1: nombre del fichero de secreto. 48 bytes en base64, sin saltos de línea.
-  fichero="$SECRETOS/$1"
+  # $1: nombre del fichero. $2 (opcional): directorio del secreto.
+  # 48 bytes en base64, sin saltos de línea.
+  directorio=${2:-$SECRETOS}
+  mkdir -p "$directorio"
+  fichero="$directorio/$1"
   if [ -s "$fichero" ]; then
     echo "  conservado: $1"
   else
@@ -107,6 +112,7 @@ case "${1:-generar}" in
     echo "Secretos en $SECRETOS:"
     generar postgres_password
     generar paperless_secret_key
+    generar paperless_admin_password "$SECRETOS_ADMIN"
     proyectar
     preparar_datos
     echo "Listo. No se ha impreso ningún secreto."

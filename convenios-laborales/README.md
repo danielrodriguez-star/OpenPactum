@@ -4,10 +4,12 @@
 
 ## Dos formas de instalar
 
-- **Despliegue autónomo (fases 3-4, sin probar con Docker)**: [despliegue/README.md](despliegue/README.md).
+- **Despliegue autónomo (fases 3-4, validado con Docker Desktop en Windows)**:
+  [despliegue/README.md](despliegue/README.md).
   No requiere clonar el repositorio, los secretos se generan en un volumen gestionado por
-  `secretos-init`, el programador sustituye a la tarea cron y hay un contenedor de arranque que lo
-  hace todo con un solo comando. Pendientes en
+  `secretos-init`, Paperless se prepara automáticamente y el programador sustituye a la tarea cron.
+  La imagen de arranque automatiza la puesta en marcha con un comando cuando se publique.
+  Pendientes en
   [docs/INVENTARIO-FASE-5.md](docs/INVENTARIO-FASE-5.md).
 - **Instalación con checkout (la probada hasta ahora)**: las secciones siguientes, con
   `instalar.sh`. Se retira en la fase 5.
@@ -34,7 +36,7 @@ El instalador:
 
 Opciones: `--sin-arrancar` (solo dependencias y configuración), `--sin-cron`, `--no-esperar-modelos`, `--ayuda`. Es seguro volver a ejecutarlo: no regenera secretos existentes, no cambia la contraseña de un administrador existente ni duplica el cron. Si algo falla, termina con un resumen de los problemas y el comando de diagnóstico. En derivadas de Debian/Ubuntu no reconocidas indique la base del repositorio de Docker: `DOCKER_DISTRO=debian DOCKER_CODENAME=bookworm ./instalar.sh`.
 
-Quedan manuales, porque requieren decisiones o credenciales suyas: el asistente inicial y la clave API de AnythingLLM, las fuentes y notificaciones de Changedetection y el SMTP del monitor (ver secciones siguientes). Las descargas (imágenes y modelos, unos 20 GB) pueden tardar bastante.
+Quedan manuales, porque requieren decisiones o credenciales suyas: el asistente inicial y la clave API de AnythingLLM, las fuentes y notificaciones de Changedetection y el SMTP del monitor (ver secciones siguientes). En el despliegue autónomo, el panel local está en http://localhost:8080 y muestra los accesos, el estado de los servicios y la última comprobación del BOE. Las descargas (imágenes y modelos, unos 20 GB) pueden tardar bastante.
 
 ## Instalación manual y otros sistemas
 
@@ -56,8 +58,13 @@ Estructura: `changedetection/`, `paperless/consume/`, `paperless/export/`, `anyt
 
 ## Accesos y activación
 
+- Panel OpenPactum (solo despliegue autónomo): http://localhost:8080 — resumen local del estado de
+  los servicios, la última comprobación del BOE y accesos a las herramientas. No sustituye su
+  configuración: las fuentes, el SMTP y la carga/organización documental se preparan en las
+  herramientas enlazadas.
+
 - Changedetection: http://localhost:5000 — añada allí las fuentes que el monitor no cubre (REGCON es web, no RSS; vea `scripts/fuentes-rss.txt`) y las URL de sus boletines provinciales. Ajuste filtros por convenio y selectores para reducir falsos avisos. Configure notificaciones en la interfaz con una URL Apprise `mailto://USUARIO:CLAVE@SERVIDOR:587/?to=DESTINO&from=ORIGEN`; codifique caracteres especiales de usuario/clave y utilice TLS según su servidor. Guarde la URL solo en la interfaz local; proteja el acceso. Sin SMTP no hay alertas de Changedetection.
-- Paperless: http://localhost:8000 — con `instalar.sh` el administrador y las etiquetas ya están creados (credenciales en `credenciales.txt`). En instalación manual, cree el administrador con `docker compose exec paperless python manage.py createsuperuser`; en Perfil → tokens API obtenga token y ejecute `PAPERLESS_TOKEN='...' ./scripts/crear-etiquetas.sh`. El OCR español/inglés se aplica automáticamente a PDFs colocados en `paperless/consume/`; compruebe que hay texto extraído. La carpeta `consume/` es local al host y Paperless retira ficheros al procesarlos.
+- Paperless: http://localhost:8000 — el despliegue autónomo crea el administrador y sus etiquetas al primer arranque. Las credenciales se guardan en `paperless/credenciales.txt` dentro de `OPENPACTUM_DATOS` (modo 600 en Linux); cámbiela tras el primer acceso. Con `instalar.sh`, las credenciales están en el `credenciales.txt` de la instalación. En instalación manual, cree el administrador con `docker compose exec paperless python manage.py createsuperuser`; en Perfil → tokens API obtenga token y ejecute `PAPERLESS_TOKEN='...' ./scripts/crear-etiquetas.sh`. El OCR español/inglés se aplica automáticamente a PDFs colocados en `paperless/consume/`; compruebe que hay texto extraído. La carpeta `consume/` es local al host y Paperless retira ficheros al procesarlos.
 - AnythingLLM: http://localhost:3001 — configure Ollama en `http://ollama:11434`, modelo indicado en `.env`, embeddings `nomic-embed-text` y LanceDB. Complete el asistente inicial. Cree clave API en AnythingLLM, copie `scripts/convenios.txt.example` a `scripts/convenios.txt`, una línea por convenio, y ejecute `ANYTHINGLLM_API_KEY='...' ./scripts/crear-workspaces.sh`. Suba manualmente el PDF del convenio desde Paperless (descárguelo o exporte) a su workspace, **insértelo en el contexto** y pregunte citando artículo y versión; valide siempre contra el texto oficial. Paperless y AnythingLLM no sincronizan documentos automáticamente.
 
 ## Monitor del BOE y correo

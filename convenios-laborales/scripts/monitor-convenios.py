@@ -68,6 +68,16 @@ def mail(items):
             server.send_message(msg)
 
 
+def guardar_estado(seen):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+            mode='w', encoding='utf-8', dir=STATE.parent, prefix=STATE.name + '.',
+            suffix='.tmp', delete=False) as f:
+        f.write(json.dumps(sorted(seen), ensure_ascii=False))
+        temporal = Path(f.name)
+    temporal.replace(STATE)
+
+
 def main():
     root = ET.fromstring(fetch(RSS))
     seen = set(json.loads(STATE.read_text()) if STATE.exists() else [])
@@ -100,11 +110,11 @@ def main():
             tmp = Path(f.name)
         tmp.replace(CONSUME / f'{identifier}.pdf')
         seen.add(identifier)
+        guardar_estado(seen)
         new.append((title, link))
         print(f'Descargado {identifier}: {title}')
+    guardar_estado(seen)
     if new:
-        STATE.parent.mkdir(parents=True, exist_ok=True)
-        STATE.write_text(json.dumps(sorted(seen), ensure_ascii=False))
         mail(new)
     else:
         print('Sin novedades.')

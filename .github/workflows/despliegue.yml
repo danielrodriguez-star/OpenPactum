@@ -1,8 +1,8 @@
 # Pruebas y validación del despliegue autónomo (fase 3).
 #
 # Las pruebas unitarias (incluidas las del manifiesto, que necesitan PyYAML) no requieren
-# Docker. La validación de Compose, en cambio, solo se hace aquí: en el equipo de desarrollo
-# no hay Docker y el manifiesto no se ha arrancado nunca con contenedores reales.
+# Docker. La validación de Compose se hace aquí; el arranque real se prueba aparte en Docker
+# Desktop y no forma parte de la CI.
 name: Despliegue
 
 on:
@@ -74,4 +74,3 @@ jobs:
             exit 0
           fi
           shellcheck --severity=warning "${scripts[@]}"
-

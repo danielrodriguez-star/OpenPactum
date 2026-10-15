@@ -14,8 +14,15 @@ SCRIPT = Path(__file__).resolve().parent.parent / 'despliegue' / 'secretos-init.
 
 
 def ejecutar(*argumentos, secretos, datos, entrada=None):
-    entorno = dict(os.environ, OPENPACTUM_SECRETOS_DIR=str(secretos), OPENPACTUM_DATOS_DIR=str(datos),
-                   USERMAP_UID='1000', USERMAP_GID='1000')
+    secretos_admin = secretos.parent / f'{secretos.name}_admin'
+    entorno = dict(
+        os.environ,
+        OPENPACTUM_SECRETOS_DIR=str(secretos),
+        OPENPACTUM_SECRETOS_ADMIN_DIR=str(secretos_admin),
+        OPENPACTUM_DATOS_DIR=str(datos),
+        USERMAP_UID='1000',
+        USERMAP_GID='1000',
+    )
     return subprocess.run(['sh', str(SCRIPT), *argumentos], env=entorno, input=entrada,
                           capture_output=True, text=True)
 
@@ -33,18 +40,23 @@ class GenerarTest(unittest.TestCase):
     def generar(self, *argumentos, entrada=None):
         return ejecutar(*argumentos, secretos=self.secretos, datos=self.datos, entrada=entrada)
 
-    def test_crea_los_dos_secretos_del_despliegue(self):
+    def test_crea_los_secretos_del_despliegue(self):
         resultado = self.generar()
         self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        secretos_admin = self.secretos.parent / f'{self.secretos.name}_admin'
         self.assertEqual(sorted(p.name for p in self.secretos.iterdir()),
                          ['paperless_secret_key', 'postgres_password'])
+        self.assertEqual(sorted(p.name for p in secretos_admin.iterdir()), ['paperless_admin_password'])
 
     def test_los_secretos_son_aleatorios_y_distintos_entre_si(self):
         self.generar()
         contrasena = (self.secretos / 'postgres_password').read_text()
         clave = (self.secretos / 'paperless_secret_key').read_text()
+        admin = (self.secretos.parent / f'{self.secretos.name}_admin' /
+                 'paperless_admin_password').read_text()
         self.assertGreaterEqual(len(contrasena), 60)
         self.assertNotEqual(contrasena, clave)
+        self.assertNotIn(admin, (contrasena, clave))
         self.assertNotIn('\n', contrasena)
 
         # Dos ejecuciones en volúmenes distintos tienen que dar valores distintos.
@@ -64,12 +76,16 @@ class GenerarTest(unittest.TestCase):
         resultado = self.generar()
         contrasena = (self.secretos / 'postgres_password').read_text()
         clave = (self.secretos / 'paperless_secret_key').read_text()
-        self.assertNotIn(contrasena, resultado.stdout + resultado.stderr)
-        self.assertNotIn(clave, resultado.stdout + resultado.stderr)
+        secreto_admin = (self.secretos.parent / f'{self.secretos.name}_admin' /
+                         'paperless_admin_password').read_text()
+        for secreto in (contrasena, clave, secreto_admin):
+            self.assertNotIn(secreto, resultado.stdout + resultado.stderr)
 
     def test_los_secretos_no_son_legibles_por_todos(self):
         self.generar()
-        for fichero in (self.secretos / 'postgres_password', self.secretos / 'paperless_secret_key'):
+        for fichero in (self.secretos / 'postgres_password', self.secretos / 'paperless_secret_key',
+                        self.secretos.parent / f'{self.secretos.name}_admin' /
+                        'paperless_admin_password'):
             with self.subTest(fichero=fichero.name):
                 self.assertEqual(stat.S_IMODE(fichero.stat().st_mode), 0o640)
 

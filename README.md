@@ -9,7 +9,7 @@ cd convenios-laborales
 ./instalar.sh
 ```
 
-## Despliegue sin clonar el repositorio (en pruebas)
+## Despliegue sin clonar el repositorio
 
 Las fases 3 y 4 añaden un despliegue autónomo en `convenios-laborales/despliegue/`: un manifiesto
 que no necesita el repositorio, los secretos generados en un volumen propio, un programador que
@@ -22,8 +22,9 @@ docker run --rm -it \
   ghcr.io/danielrodriguez-star/openpactum-arranque:VERSION arriba
 ```
 
-**No se ha probado con Docker real** y la imagen de arranque todavía no se publica (falta la
-variable de repositorio `COMPOSE_SHA256`). Vea
+La pila se ha probado localmente con Docker Desktop en Windows; todavía hacen falta pruebas en
+otras plataformas. La imagen de arranque aún no se ha publicado; el flujo de GitHub Actions calcula
+el hash del manifiesto automáticamente al construirla. Vea
 [convenios-laborales/despliegue/README.md](convenios-laborales/despliegue/README.md) y la lista de
 [pendientes](convenios-laborales/docs/INVENTARIO-FASE-5.md). La instalación con `instalar.sh` sigue
 siendo la vía probada hasta que la fase 5 la retire.

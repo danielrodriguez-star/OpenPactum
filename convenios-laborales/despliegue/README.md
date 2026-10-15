@@ -1,18 +1,18 @@
 # Despliegue autónomo (fase 3)
 
-**Estado: sin probar con Docker real.** El manifiesto y el arranque se han escrito y se validan
-por sintaxis, pero **nunca se han arrancado** en un equipo con Docker. La validación de Compose
-(`docker compose config -q`) se hace solo en CI, porque en el equipo de desarrollo no hay Docker.
-Lo que sigue describe el uso previsto, no una instalación verificada.
+**Estado: probado con Docker Desktop en Windows**, con volúmenes y prefijo de prueba aislados:
+los servicios principales respondieron, Paperless llegó a estado saludable y Ollama pudo descargar
+y ejecutar un modelo pequeño. El uso con otros sistemas y hardware sigue requiriendo validación.
 
 Este directorio contiene el despliegue **sin clonar el repositorio**: el manifiesto y sus
 ficheros auxiliares se pueden descargar sueltos y ejecutar en cualquier equipo con Docker.
 
 | Fichero | Para qué sirve |
 | --- | --- |
-| `compose.yaml` | Manifiesto de la pila completa (vigilancia, Paperless, Ollama, AnythingLLM, monitor y programador). |
+| `compose.yaml` | Manifiesto de la pila completa (panel local, vigilancia, Paperless, Ollama, AnythingLLM, monitor y programador). |
 | `.env.example` | Configuración del despliegue: prefijo, rutas, secretos, modelo y SMTP. |
 | `secretos-init.sh` | Genera los secretos en su volumen, los proyecta para Paperless y prepara los datos del host. |
+| `paperless-init.py` | Crea idempotentemente el administrador inicial y las etiquetas estándar de Paperless. |
 | `validar-despliegue.sh` | Prueba local: sintaxis, pruebas unitarias y validez del manifiesto. |
 
 ## Requisitos
@@ -50,18 +50,19 @@ ficheros auxiliares se pueden descargar sueltos y ejecutar en cualquier equipo c
 
    Los arranques siguientes ya son un solo comando (`up -d`).
 
-Los puertos se publican **solo en `127.0.0.1`**: Changedetection en 5000, Paperless en 8000 y
-AnythingLLM en 3001. Ollama no publica puerto. El servicio `secretos-init` prepara los secretos y el
-árbol de datos del host (directorios, propietario y permisos) antes de arrancar el resto; el resto
-de pasos manuales de la instalación con `instalar.sh` (crear el administrador de Paperless,
-etiquetas, asistente de AnythingLLM, SMTP) siguen siendo manuales y están descritos en el
-[README de la instalación](../README.md).
+Los puertos se publican **solo en `127.0.0.1`**: el panel OpenPactum en 8080, Changedetection en
+5000, Paperless en 8000 y AnythingLLM en 3001. Abra http://localhost:8080 para ver el estado y
+acceder a las herramientas. Ollama no publica puerto. `secretos-init` prepara los secretos y el
+árbol de datos del host; cuando Paperless está sano, `paperless-init` crea automáticamente el
+administrador inicial y las etiquetas. El asistente inicial de AnythingLLM y la configuración SMTP
+siguen siendo manuales y están descritos en el [README de la instalación](../README.md).
 
 ### Prefijo del proyecto
 
 `OPENPACTUM_PREFIJO` (por defecto `openpactum`) nombra el proyecto de Compose y los volúmenes
-(`openpactum_postgres_datos`, `openpactum_ollama_datos`, …, incluido el volumen de secretos
-`openpactum_secretos`). Sirve para tener dos instalaciones en el mismo equipo sin que se pisen; los
+(`openpactum_postgres_datos`, `openpactum_ollama_datos`, …, incluidos los volúmenes de secretos
+`openpactum_secretos` y `openpactum_paperless_admin_secretos`). Sirve para tener dos instalaciones
+en el mismo equipo sin que se pisen; los
 nombres de los volúmenes están fijados de forma explícita para que cambiar el prefijo no deje los
 datos anteriores huérfanos.
 
@@ -69,17 +70,26 @@ datos anteriores huérfanos.
 
 `secretos-init` (servicio de un solo uso, se ejecuta antes que el resto):
 
-- Genera `postgres_password` y `paperless_secret_key` en el volumen `<prefijo>_secretos`, con
-  `/dev/urandom`. **Nunca sobrescribe** un secreto existente y nunca lo imprime.
+- Genera `postgres_password` y `paperless_secret_key` en el volumen `<prefijo>_secretos`, y
+  `paperless_admin_password` en `<prefijo>_paperless_admin_secretos`, con `/dev/urandom`.
+  **Nunca sobrescribe** un secreto existente y nunca lo imprime.
 - Proyecta ambos en `<datos>/secretos/paperless.env` (0640, grupo `USERMAP_GID`) para Paperless,
   cuya imagen no admite el convenio `*_FILE`. Es un artefacto derivado: se puede borrar y se
   regenera a partir del volumen.
 - Prepara el árbol de datos del host (directorios, propietario `USERMAP_UID:GID` y permisos de
   `paperless/consume`), que antes hacía `preparar.sh` al instalar con `instalar.sh`.
 
+El monitor solo necesita el volumen general (por ejemplo, para SMTP); el secreto de la contraseña
+del administrador queda en un volumen separado que solo monta `paperless-init`.
+
+Después de que Paperless esté sano, `paperless-init` crea el administrador (solo si aún no existe)
+y las etiquetas habituales. Las credenciales iniciales quedan en
+`<OPENPACTUM_DATOS>/paperless/credenciales.txt`; cámbielas después del primer acceso y proteja o
+elimine ese fichero. El servicio no cambia la contraseña de un administrador que ya exista.
+
 Postgres sí admite ficheros (`POSTGRES_PASSWORD_FILE`) y el monitor también
-(`SMTP_PASSWORD_FILE`), así que ambos leen del volumen directamente. Para guardar un secreto que
-no se genera solo:
+(`SMTP_PASSWORD_FILE`), así que ambos leen del volumen general directamente. Para guardar un
+secreto que no se genera solo:
 
 ```bash
 printf '%s' 'clave-smtp' | docker compose --env-file .env -f compose.yaml run --rm -T --no-deps secretos-init escribir smtp_password
@@ -92,11 +102,16 @@ que se crearon los secretos).
 
 ### Monitor y programador
 
-- `programador`: repite el monitor cada `OPENPACTUM_INTERVALO` segundos (6 h por defecto, la misma
-  cadencia que la tarea cron anterior).
-- `monitor`: ejecución manual, `docker compose run --rm monitor`.
+- `programador`: hace una ejecución inicial y repite el monitor cada `OPENPACTUM_INTERVALO`
+  segundos (6 h por defecto, la misma cadencia que la tarea cron anterior).
+- `monitor`: ejecución manual, `docker compose --profile manual run --rm monitor`. Está excluido
+  del arranque normal para evitar procesar dos veces el feed junto al programador.
 - Los avisos por correo se configuran con `SMTP_*` en el fichero de entorno; sin `SMTP_HOST` el
   monitor solo deja constancia en el log del contenedor.
+- El panel de http://localhost:8080 muestra disponibilidad, fecha de la última comprobación y
+  accesos a las interfaces. La configuración de fuentes, correo y documentos aún se completa en
+  las herramientas enlazadas.
+- El asistente inicial de AnythingLLM y su clave API siguen siendo pasos manuales.
 
 ## Arranque con un solo comando (fase 4)
 
@@ -133,13 +148,15 @@ Para construirla a mano (el contexto de construcción es `convenios-laborales/`)
 ```bash
 docker build -f convenios-laborales/arranque/Dockerfile \
   --build-arg OPENPACTUM_VERSION=0.1.0 \
-  --build-arg OPENPACTUM_URL_MANIFIESTO=https://raw.githubusercontent.com/danielrodriguez-star/OpenPactum/0.1.0/convenios-laborales/despliegue/compose.yaml \
+  --build-arg OPENPACTUM_URL_MANIFIESTO=https://raw.githubusercontent.com/danielrodriguez-star/OpenPactum/v0.1.0/convenios-laborales/despliegue/compose.yaml \
   --build-arg OPENPACTUM_COMPOSE_SHA256="$(sha256sum convenios-laborales/despliegue/compose.yaml | cut -d' ' -f1)" \
   -t openpactum-arranque:0.1.0 convenios-laborales
 ```
 
-**Todavía no hay imagen publicada**: sin la variable de repositorio `COMPOSE_SHA256` el flujo de CI
-no la construye. La validación con Docker real de este contenedor sigue pendiente.
+**Todavía no hay imagen publicada.** El flujo de GitHub Actions calcula el hash del manifiesto
+desde el mismo checkout que construye la imagen; en pull requests la construye sin publicarla y en
+`main` o en etiquetas semánticas la publica en GHCR. La imagen local se construyó y se probó su
+orden `ayuda`; el despliegue completo desde una imagen publicada sigue pendiente.
 
 ## Prueba local
 
@@ -164,16 +181,21 @@ Hace tres cosas:
    prefijo distinto del habitual. Si no lo hay, lo indica y continúa.
 
 Opciones: `--sin-sintaxis`, `--sin-pruebas` y `--sin-docker` (es lo que usa la CI para no repetir
-las pruebas). **Lo que no prueba**: arrancar la pila, crear volúmenes, permisos reales, descarga de
-modelos ni el asistente inicial de las aplicaciones. Eso requiere un equipo con Docker y está
-pendiente.
+las pruebas). **Lo que no prueba**: el script local no arranca la pila ni comprueba permisos, descarga de modelos
+o asistentes iniciales. La pila completa sí se probó en Docker Desktop para Windows: servicios e
+interfaces respondieron, Paperless procesó documentos, Ollama ejecutó un modelo, el acceso inicial
+de Paperless y sus ocho etiquetas se verificaron, y repetir el bootstrap conservó la contraseña.
+Esta prueba no sustituye la validación en otros sistemas y configuraciones.
 
-## Pendientes conocidos de este despliegue
+## Límites y trabajo pendiente
 
-- `COMPOSE_SHA256` no está definido: sin esa variable de repositorio no se construye la imagen del
-  contenedor de arranque (fase 4).
-- Nadie ha comprobado todavía el ciclo completo de secretos con Docker (permisos reales del
-  volumen, `env_file` de Paperless y `POSTGRES_PASSWORD_FILE`).
-- Los digests de las imágenes no están fijados y Redis usa la etiqueta flotante `7-alpine`.
-- El `cap_add: SYS_ADMIN` de AnythingLLM no se ha verificado.
-- `MIGRACION.md` (paso desde la instalación con `instalar.sh`) todavía no está escrito.
+- La pila se ha probado en Docker Desktop para Windows, no en Linux ni en otras configuraciones de
+  hardware; revisa permisos, copias de seguridad y espacio disponible antes de usarla con datos
+  importantes.
+- Las imágenes se fijan por versión, pero no por digest; Redis mantiene la etiqueta flotante
+  `7-alpine`.
+- No se ha comprobado si AnythingLLM funciona sin `cap_add: SYS_ADMIN`.
+- La migración desde la instalación con `instalar.sh` aún no tiene guía.
+- El asistente/API de AnythingLLM, las fuentes y notificaciones de Changedetection, y el SMTP se
+  configuran manualmente. Paperless y AnythingLLM no sincronizan documentos entre sí.
+- La comparación de versiones de convenios sigue siendo manual; revisa siempre el PDF oficial.

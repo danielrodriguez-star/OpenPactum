@@ -1,23 +1,23 @@
 # Inventario para la fase 5
 
-Recuento de lo que queda pendiente después de las fases 1 a 4. Nada de esta lista está hecho: es
-el punto de partida para repartir el trabajo.
+Estado actualizado tras validar el despliegue con Docker Desktop en Windows. La pila arranca,
+Paperless prepara el administrador y las etiquetas, y el panel local muestra el estado; esta lista
+se limita a los pendientes que aún no están resueltos.
 
-## 1. Pendientes que bloquean o degradan el despliegue nuevo
+## 1. Pendientes técnicos
 
 | Pendiente | Consecuencia hoy | Qué haría falta |
 | --- | --- | --- |
-| `COMPOSE_SHA256` sin definir como variable de repositorio | La imagen de arranque **no se construye** (el flujo de CI la salta) ni se publica | Calcular `sha256sum convenios-laborales/despliegue/compose.yaml` y definirlo en las variables del repositorio; actualizarlo cuando cambie el manifiesto |
 | Digests de las imágenes sin fijar | Un cambio de etiqueta puede traer una versión distinta sin que el repositorio cambie | Fijar `imagen@sha256:…` (o al menos etiquetas de parche) para todas las imágenes |
 | Redis con la etiqueta flotante `redis:7-alpine` | Se actualiza solo al descargar; puede romper la pila sin aviso | Fijar una versión concreta (y su digest) |
 | `cap_add: SYS_ADMIN` en AnythingLLM sin verificar | Se concede una capacidad amplia al contenedor sin saber si la necesita | Probar AnythingLLM sin `cap_add`; si funciona, retirarlo; si no, documentar por qué se necesita |
-| Nadie ha arrancado la pila con Docker real | Manifiesto, secretos, permisos y arranque solo están validados por sintaxis | Prueba en un equipo con Docker: `arriba`, comprobar salud de los servicios, reiniciar y comprobar que los datos y los secretos persisten |
 | `MIGRACION.md` sin escribir | Quien tenga la instalación con `instalar.sh` no tiene guía para pasar al despliegue nuevo | Documentar el paso: conservar datos, reutilizar secretos, no perder el estado del monitor |
-| Imagen de arranque sin validar en CI | Su Dockerfile no se construye en ningún flujo hasta que exista `COMPOSE_SHA256` | Construirla (sin publicar) en los pull request una vez definida la variable |
+| Validación del despliegue fuera de Windows | Los permisos POSIX, el hardware y los volúmenes no se han verificado en Linux | Ejecutar el mismo ciclo de instalación, reinicio y persistencia en las plataformas que se quieran soportar |
 
 ## 2. Retirada de la instalación con checkout (fase 5)
 
-Se retiran cuando el despliegue nuevo esté probado con Docker:
+Se retiran cuando el despliegue nuevo esté validado en las plataformas objetivo y haya una guía
+segura de migración:
 
 - `instalar.sh` (instalador de Debian/Ubuntu) y sus opciones.
 - `scripts/` del host: `monitor-convenios.sh`, `instalar-cron.sh`, `preparar.sh`,
@@ -44,7 +44,6 @@ Ninguna de estas está puesta (no se han probado y algunas pueden romper servici
 
 ## 4. Funcionalidad que sigue siendo manual
 
-- Crear el administrador de Paperless y sus etiquetas.
 - Asistente inicial y clave API de AnythingLLM; subir los PDF a los workspaces (Paperless y
   AnythingLLM no se sincronizan solos).
 - Configurar SMTP del monitor y las fuentes de Changedetection.

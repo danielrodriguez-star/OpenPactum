@@ -40,6 +40,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Instalar dependencias de prueba
+        run: python3 -m pip install pyyaml
+
       - name: Ejecutar pruebas
         run: python3 -m unittest discover -s convenios-laborales/tests -v
 
@@ -86,7 +89,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            OPENPACTUM_VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+            OPENPACTUM_VERSION=${{ steps.meta.outputs.version || github.sha }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha

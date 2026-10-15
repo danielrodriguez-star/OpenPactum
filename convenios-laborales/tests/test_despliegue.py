@@ -65,8 +65,8 @@ class ManifiestoTest(unittest.TestCase):
     def test_define_todos_los_servicios_de_la_pila(self):
         self.assertEqual(
             sorted(self.servicios),
-            ['anythingllm', 'changedetection', 'modelos', 'monitor', 'ollama', 'paperless',
-             'postgres', 'programador', 'redis', 'secretos-init'],
+            ['anythingllm', 'changedetection', 'modelos', 'monitor', 'ollama', 'panel',
+             'paperless', 'paperless-init', 'postgres', 'programador', 'redis', 'secretos-init'],
         )
 
     def test_no_usa_la_clave_version_obsoleta(self):
@@ -93,8 +93,17 @@ class ManifiestoTest(unittest.TestCase):
         dependencia = self.servicios['paperless']['depends_on']['postgres']
         self.assertEqual(dependencia['condition'], 'service_healthy')
 
+    def test_paperless_init_crea_el_administrador_tras_la_salud_del_servicio(self):
+        bootstrap = self.servicios['paperless-init']
+        self.assertEqual(bootstrap['depends_on']['paperless']['condition'], 'service_healthy')
+        self.assertEqual(bootstrap['working_dir'], '/usr/src/paperless/src')
+        self.assertIn('paperless_admin_secretos:/run/secretos-admin:ro', bootstrap['volumes'])
+        self.assertIn('paperless-init.py:/usr/local/lib/openpactum/paperless-init.py:ro',
+                      texto_crudo())
+        self.assertEqual(bootstrap['restart'], 'no')
+
     def test_secretos_init_termina_antes_que_los_servicios_que_montan_datos(self):
-        for nombre in ('changedetection', 'paperless', 'anythingllm', 'monitor', 'programador'):
+        for nombre in ('changedetection', 'paperless', 'anythingllm', 'monitor', 'panel', 'programador'):
             with self.subTest(servicio=nombre):
                 dependencia = self.servicios[nombre]['depends_on']['secretos-init']
                 self.assertEqual(dependencia['condition'], 'service_completed_successfully')
@@ -135,8 +144,16 @@ class ManifiestoTest(unittest.TestCase):
             with self.subTest(servicio=nombre):
                 self.assertNotIn('container_name', servicio)
 
-    def test_el_manifiesto_avisa_de_que_no_se_ha_probado_con_docker(self):
-        self.assertIn('no se ha arrancado nunca con Docker real', texto_crudo())
+    def test_el_monitor_manual_no_se_inicia_con_la_pila_normal(self):
+        self.assertEqual(self.servicios['monitor']['profiles'], ['manual'])
+        self.assertNotIn('profiles', self.servicios['programador'])
+
+    def test_el_panel_es_local_y_solo_lee_el_estado_del_monitor(self):
+        panel = self.servicios['panel']
+        self.assertEqual(panel['ports'], ['127.0.0.1:8080:8080'])
+        self.assertEqual(panel['volumes'], [
+            '/var/lib/openpactum/datos/monitor:/estado:ro',
+        ])
 
 
 class PrefijoTest(unittest.TestCase):
@@ -155,7 +172,7 @@ class PrefijoTest(unittest.TestCase):
         # cambiar el prefijo dejaría los datos anteriores huérfanos.
         crudo = texto_crudo()
         for nombre in ('redis_datos', 'postgres_datos', 'paperless_datos',
-                       'paperless_media', 'ollama_datos'):
+                       'paperless_media', 'ollama_datos', 'paperless_admin_secretos'):
             with self.subTest(volumen=nombre):
                 self.assertIn(f'name: ${{OPENPACTUM_PREFIJO:-openpactum}}_{nombre}', crudo)
 
@@ -199,6 +216,15 @@ class ValidadorTest(unittest.TestCase):
                                    capture_output=True, text=True, cwd=str(DESPLIEGUE.parent.parent))
         self.assertEqual(resultado.returncode, 0, resultado.stdout + resultado.stderr)
         self.assertIn('Sintaxis de los scripts', resultado.stdout)
+
+    def test_los_scripts_de_shell_usan_finales_de_linea_linux(self):
+        scripts = list(CONVENIOS.rglob('*.sh'))
+        self.assertTrue(scripts)
+        for script in scripts:
+            with self.subTest(script=script.relative_to(CONVENIOS)):
+                self.assertNotIn(b'\r', script.read_bytes())
+        self.assertIn('*.sh text eol=lf',
+                      (RAIZ_REPO / '.gitattributes').read_text(encoding='utf-8'))
 
 
 class HigieneTest(unittest.TestCase):
@@ -261,8 +287,8 @@ class InventarioTest(unittest.TestCase):
     def test_existe_y_nombra_los_pendientes_declarados(self):
         self.assertTrue(self.INVENTARIO.is_file())
         texto = self.texto()
-        for pendiente in ('COMPOSE_SHA256', 'MIGRACION.md', 'SYS_ADMIN', 'Digests',
-                          'redis:7-alpine', 'Docker real'):
+        for pendiente in ('MIGRACION.md', 'SYS_ADMIN', 'Digests',
+                          'redis:7-alpine', 'Validación del despliegue fuera de Windows'):
             with self.subTest(pendiente=pendiente):
                 self.assertIn(pendiente, texto)
 
@@ -276,6 +302,12 @@ class InventarioTest(unittest.TestCase):
     def test_no_da_por_hecho_lo_que_no_esta_probado(self):
         self.assertIn('Ninguna de estas está puesta', self.texto())
 
+    def test_no_mantiene_pendientes_ya_resueltos(self):
+        texto = self.texto()
+        self.assertNotIn('COMPOSE_SHA256 sin definir', texto)
+        self.assertNotIn('Nadie ha arrancado la pila', texto)
+        self.assertNotIn('Crear el administrador de Paperless', texto)
+
 
 class DocumentacionTest(unittest.TestCase):
     LECTURA = DESPLIEGUE / 'README.md'
@@ -287,10 +319,10 @@ class DocumentacionTest(unittest.TestCase):
             with self.subTest(opcion=opcion):
                 self.assertIn(opcion, texto)
 
-    def test_el_readme_no_promete_una_instalacion_probada(self):
+    def test_el_readme_indica_el_alcance_de_la_prueba_real(self):
         texto = self.LECTURA.read_text(encoding='utf-8')
-        self.assertIn('sin probar con Docker real', texto)
-        self.assertIn('nunca se han arrancado', texto)
+        self.assertIn('probado con Docker Desktop en Windows', texto)
+        self.assertIn('otros sistemas y hardware sigue requiriendo validación', texto)
 
     def test_los_readmes_apuntan_al_despliegue_nuevo_y_a_sus_pendientes(self):
         for fichero in (RAIZ_REPO / 'README.md', CONVENIOS / 'README.md'):
@@ -299,10 +331,21 @@ class DocumentacionTest(unittest.TestCase):
                 self.assertIn('despliegue/README.md', texto)
                 self.assertIn('docs/INVENTARIO-FASE-5.md', texto)
 
-    def test_el_readme_principal_avisa_de_que_la_imagen_no_se_publica(self):
-        texto = (RAIZ_REPO / 'README.md').read_text(encoding='utf-8')
-        self.assertIn('COMPOSE_SHA256', texto)
-        self.assertIn('No se ha probado con Docker real', texto)
+    def test_el_readme_principal_indica_el_estado_de_la_imagen_de_arranque(self):
+        texto = ' '.join((RAIZ_REPO / 'README.md').read_text(encoding='utf-8').split())
+        self.assertIn('imagen de arranque aún no se ha publicado', texto)
+        self.assertIn('calcula el hash del manifiesto automáticamente', texto)
+        self.assertIn('probado localmente con Docker Desktop en Windows', texto)
+
+    def test_el_readme_documenta_el_archivo_de_credenciales_de_paperless(self):
+        texto = self.LECTURA.read_text(encoding='utf-8')
+        self.assertIn('paperless/credenciales.txt', texto)
+
+    def test_el_readme_documenta_la_publicacion_automatica_del_arranque(self):
+        texto = ' '.join(self.LECTURA.read_text(encoding='utf-8').split())
+        self.assertIn('flujo de GitHub Actions calcula el hash', texto)
+        self.assertIn('Todavía no hay imagen publicada', texto)
+        self.assertIn('OpenPactum/v0.1.0/convenios-laborales/despliegue/compose.yaml', texto)
 
 
 class SecretosTest(unittest.TestCase):
@@ -315,6 +358,10 @@ class SecretosTest(unittest.TestCase):
     def test_el_volumen_de_secretos_lleva_el_prefijo(self):
         self.assertIn('name: ${OPENPACTUM_PREFIJO:-openpactum}_secretos', texto_crudo())
         self.assertEqual(self.manifiesto['volumes']['secretos']['name'], 'openpactum_secretos')
+        self.assertEqual(
+            self.manifiesto['volumes']['paperless_admin_secretos']['name'],
+            'openpactum_paperless_admin_secretos',
+        )
         self.assertEqual(cargar({'OPENPACTUM_PREFIJO': 'otro'})['volumes']['secretos']['name'],
                          'otro_secretos')
 

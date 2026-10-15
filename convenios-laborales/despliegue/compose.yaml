@@ -7,8 +7,7 @@
 #
 # Vea `despliegue/README.md` y `despliegue/.env.example`.
 #
-# AVISO: este manifiesto no se ha arrancado nunca con Docker real. La única validación
-# automática es `docker compose config -q` en CI (.github/workflows/despliegue.yml).
+# La validación automática está en CI (.github/workflows/despliegue.yml).
 # Los pendientes (digests, cap_add de AnythingLLM, etc.) están en docs/INVENTARIO-FASE-5.md.
 
 # Prefijo del proyecto y de los volúmenes: permite varias instalaciones (o una de pruebas) en
@@ -58,6 +57,7 @@ services:
     volumes:
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}:/datos
       - secretos:/secretos
+      - paperless_admin_secretos:/secretos-admin
       - ${OPENPACTUM_DESPLEGUE:-.}/secretos-init.sh:/usr/local/lib/openpactum/secretos-init.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/lib/openpactum/secretos-init.sh"]
 
@@ -132,6 +132,29 @@ services:
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/consume:/usr/src/paperless/consume
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/export:/usr/src/paperless/export
 
+  paperless-init:
+    image: ghcr.io/paperless-ngx/paperless-ngx:2.18.4
+    restart: "no"
+    depends_on:
+      paperless: {condition: service_healthy}
+    working_dir: /usr/src/paperless/src
+    user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"
+    environment:
+      PAPERLESS_REDIS: redis://redis:6379
+      PAPERLESS_DBHOST: postgres
+      PAPERLESS_DBNAME: paperless
+      PAPERLESS_DBUSER: paperless
+      OPENPACTUM_PAPERLESS_ADMIN: ${OPENPACTUM_PAPERLESS_ADMIN:-admin}
+    env_file:
+      - path: ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/secretos/paperless.env
+        required: false
+    volumes:
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless:/datos/paperless
+      - paperless_admin_secretos:/run/secretos-admin:ro
+      - ${OPENPACTUM_DESPLEGUE:-.}/paperless-init.py:/usr/local/lib/openpactum/paperless-init.py:ro
+    entrypoint: ["python3", "manage.py", "shell", "-c"]
+    command: ["exec(open('/usr/local/lib/openpactum/paperless-init.py').read())"]
+
   ollama:
     image: ollama/ollama:0.9.6
     restart: unless-stopped
@@ -174,11 +197,28 @@ services:
       # Fichero de configuración del asistente inicial (lo crea secretos-init).
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/anythingllm/.env:/app/server/.env
 
-  # Ejecución manual: docker compose run --rm monitor
+  # Ejecución manual: docker compose --profile manual run --rm monitor
   monitor:
     <<: *monitor
+    profiles: [manual]
 
-  # Programador: repite el monitor cada OPENPACTUM_INTERVALO segundos (6 h por defecto).
+  panel:
+    image: ghcr.io/${OPENPACTUM_PROPIETARIO:-danielrodriguez-star}/openpactum-monitor:${OPENPACTUM_VERSION:?Defina OPENPACTUM_VERSION con la etiqueta publicada del monitor}
+    restart: unless-stopped
+    depends_on:
+      secretos-init: {condition: service_completed_successfully}
+    user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"
+    entrypoint: ["python3", "/app/panel.py"]
+    ports: ["127.0.0.1:8080:8080"]
+    environment:
+      OPENPACTUM_PANEL_HOST: 0.0.0.0
+      OPENPACTUM_PANEL_PORT: 8080
+      OPENPACTUM_PANEL_ESTADO: /estado/estado-rss.json
+      OPENPACTUM_PANEL_CAMBIOS: /estado
+    volumes:
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/monitor:/estado:ro
+
+  # Programador: primera ejecución al iniciar y después cada OPENPACTUM_INTERVALO segundos.
   programador:
     <<: *monitor
     restart: unless-stopped
@@ -186,14 +226,16 @@ services:
     command:
       - |
         while :; do
-          python3 /app/monitor-convenios.py || echo 'Aviso: el monitor falló; se reintentará.'
+          python3 /app/monitor-convenios.py || echo 'Aviso: el monitor falló; se reintentará.' >&2
           sleep ${OPENPACTUM_INTERVALO:-21600}
         done
 
 volumes:
-  # Secretos generados por secretos-init. Este es el único sitio donde viven.
+  # Secretos de servicios y del administrador, aislados en volúmenes separados.
   secretos:
     name: ${OPENPACTUM_PREFIJO:-openpactum}_secretos
+  paperless_admin_secretos:
+    name: ${OPENPACTUM_PREFIJO:-openpactum}_paperless_admin_secretos
   redis_datos:
     name: ${OPENPACTUM_PREFIJO:-openpactum}_redis_datos
   postgres_datos:

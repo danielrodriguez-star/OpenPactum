@@ -22,7 +22,7 @@ RUN groupadd --system --gid 10001 openpactum \
  && mkdir -p /data/estado /data/consume \
  && chown -R 10001:10001 /data
 
-COPY monitor-convenios.py /app/monitor-convenios.py
+COPY monitor-convenios.py panel.py /app/
 
 WORKDIR /app
 USER 10001:10001

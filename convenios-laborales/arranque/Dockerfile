@@ -28,9 +28,10 @@ ENV OPENPACTUM_VERSION=${OPENPACTUM_VERSION} \
     OPENPACTUM_RAIZ=/var/lib/openpactum
 
 COPY arranque/arrancar.sh /usr/local/lib/openpactum/arrancar.sh
-# El manifiesto y el script de secretos van fijados a la imagen: se copian al desplegar.
+# Los ficheros auxiliares van fijados a la imagen: se copian al desplegar.
 COPY despliegue/secretos-init.sh /usr/local/lib/openpactum/secretos-init.sh
 COPY despliegue/.env.example /usr/local/lib/openpactum/ejemplo.env
+COPY despliegue/paperless-init.py /usr/local/lib/openpactum/paperless-init.py
 
 RUN chmod 0755 /usr/local/lib/openpactum/arrancar.sh
 

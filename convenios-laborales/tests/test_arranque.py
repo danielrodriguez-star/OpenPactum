@@ -61,6 +61,7 @@ class ArranqueTest(unittest.TestCase):
         shutil.copy(DESPLIEGUE / '.env.example', self.lib / 'ejemplo.env')
         self.manifiesto_falso = self.raiz / 'falso.yaml'
         self.manifiesto_falso.write_bytes(self.manifiesto)
+        shutil.copy(DESPLIEGUE / 'paperless-init.py', self.lib / 'paperless-init.py')
         self._crear_stubs()
 
     def tearDown(self):
@@ -111,6 +112,14 @@ class ArranqueTest(unittest.TestCase):
         self.assertEqual(self.ruta('despliegue', 'compose.yaml').read_bytes(), self.manifiesto)
         self.assertIn('manifiesto descargado y verificado', resultado.stdout)
 
+    def test_arriba_muestra_el_panel_y_las_tareas_de_configuracion_restantes(self):
+        resultado = self.ejecutar('arriba')
+        self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        self.assertIn('http://localhost:8080', resultado.stdout)
+        self.assertIn('asistente inicial de AnythingLLM', resultado.stdout)
+        self.assertIn('fuentes y avisos de Changedetection', resultado.stdout)
+        self.assertNotIn('administrador de Paperless y sus etiquetas', resultado.stdout)
+
     def test_los_secretos_se_preparan_antes_de_arrancar_la_pila(self):
         resultado = self.ejecutar('arriba')
         self.assertEqual(resultado.returncode, 0, resultado.stderr)
@@ -148,6 +157,11 @@ class ArranqueTest(unittest.TestCase):
         self.ejecutar('arriba')
         copia = self.ruta('despliegue', 'secretos-init.sh')
         self.assertEqual(copia.read_bytes(), (self.lib / 'secretos-init.sh').read_bytes())
+
+    def test_copia_el_bootstrap_de_paperless_que_lleva_dentro_la_imagen(self):
+        self.ejecutar('arriba')
+        copia = self.ruta('despliegue', 'paperless-init.py')
+        self.assertEqual(copia.read_bytes(), (self.lib / 'paperless-init.py').read_bytes())
 
     def test_comprueba_que_el_motor_de_docker_responde(self):
         resultado = self.ejecutar('arriba', docker_falla=True)
@@ -241,24 +255,29 @@ class ArranqueTest(unittest.TestCase):
         self.assertIn('ENTRYPOINT ["/bin/sh", "/usr/local/lib/openpactum/arrancar.sh"]', dockerfile)
         # El contexto de construcción es convenios-laborales/: los COPY tienen que existir.
         for origen in ('arranque/arrancar.sh', 'despliegue/secretos-init.sh',
-                       'despliegue/.env.example'):
+                       'despliegue/.env.example', 'despliegue/paperless-init.py'):
             with self.subTest(origen=origen):
                 self.assertIn(f'COPY {origen}', dockerfile)
                 self.assertTrue((CONVENIOS / origen).is_file(), origen)
 
     def test_el_dockerfile_usa_la_misma_ruta_de_lib_que_el_script(self):
         dockerfile = (ARRANQUE / 'Dockerfile').read_text()
-        for fichero in ('arrancar.sh', 'secretos-init.sh', 'ejemplo.env'):
+        for fichero in ('arrancar.sh', 'secretos-init.sh', 'ejemplo.env', 'paperless-init.py'):
             with self.subTest(fichero=fichero):
                 self.assertIn(f'/usr/local/lib/openpactum/{fichero}', dockerfile)
         # El script busca ahí sus ficheros si no se le dice otra cosa.
         self.assertIn('${OPENPACTUM_LIB:-/usr/local/lib/openpactum}', SCRIPT.read_text())
 
-    def test_la_imagen_no_se_construye_sin_la_variable_compose_sha256(self):
+    def test_la_imagen_calcula_el_hash_sin_variable_de_repositorio(self):
         workflow = (RAIZ_REPO / '.github' / 'workflows' / 'arranque-imagen.yml').read_text()
-        self.assertIn("if: vars.COMPOSE_SHA256 != ''", workflow)
-        self.assertIn('OPENPACTUM_COMPOSE_SHA256=${{ vars.COMPOSE_SHA256 }}', workflow)
         self.assertIn('sha256sum convenios-laborales/despliegue/compose.yaml', workflow)
+        self.assertIn('sha256: ${{ steps.manifiesto.outputs.sha256 }}', workflow)
+        self.assertIn('OPENPACTUM_COMPOSE_SHA256=${{ needs.hash.outputs.sha256 }}', workflow)
+        self.assertIn('OPENPACTUM_VERSION=${{ steps.meta.outputs.version || github.sha }}', workflow)
+        self.assertNotIn('vars.COMPOSE_SHA256', workflow)
+        monitor_workflow = (RAIZ_REPO / '.github' / 'workflows' / 'monitor-imagen.yml').read_text()
+        self.assertIn('OPENPACTUM_VERSION=${{ steps.meta.outputs.version || github.sha }}',
+                      monitor_workflow)
 
 
 class DocumentacionArranqueTest(unittest.TestCase):
@@ -277,8 +296,10 @@ class DocumentacionArranqueTest(unittest.TestCase):
     def test_el_readme_avisa_del_riesgo_del_socket(self):
         self.assertIn('control total del equipo anfitrión', self.texto())
 
-    def test_el_readme_dice_que_ya_no_hay_imagen_publicada_sin_la_variable(self):
-        self.assertIn('Todavía no hay imagen publicada', self.texto())
+    def test_el_readme_documenta_el_calculo_automatico_del_hash(self):
+        texto = self.texto()
+        self.assertIn('Todavía no hay imagen publicada', texto)
+        self.assertIn('calcula el hash del manifiesto', texto)
 
 
 if __name__ == '__main__':

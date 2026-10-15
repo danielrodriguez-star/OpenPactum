@@ -1,11 +1,7 @@
 # Imagen del contenedor de arranque (fase 4).
 #
-# Solo se construye y publica si el repositorio define la variable COMPOSE_SHA256 con el hash
-# del manifiesto vigente (despliegue/compose.yaml): la imagen lleva ese hash dentro y lo
-# verifica al descargar el manifiesto. Sin la variable no hay imagen de arranque.
-#
-# En un pull request no se publica nada; además, si el manifiesto cambia, el trabajo avisa del
-# hash nuevo para actualizar la variable después de fusionar.
+# El flujo calcula el hash del manifiesto desde el mismo checkout que construye la imagen:
+# no hay que mantener una variable de repositorio. En pull requests se construye sin publicar.
 name: Imagen de arranque
 
 on:
@@ -32,38 +28,27 @@ concurrency:
 
 jobs:
   hash:
-    name: Comprobar COMPOSE_SHA256
+    name: Calcular hash del manifiesto
     runs-on: ubuntu-24.04
+    outputs:
+      sha256: ${{ steps.manifiesto.outputs.sha256 }}
     steps:
       - name: Obtener el código
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Comparar el manifiesto con la variable del repositorio
-        env:
-          ESPERADO: ${{ vars.COMPOSE_SHA256 }}
+      - name: Calcular SHA-256 del manifiesto
+        id: manifiesto
         run: |
           set -euo pipefail
-          real=$(sha256sum convenios-laborales/despliegue/compose.yaml | cut -d' ' -f1)
-          echo "Hash del manifiesto: $real"
-          if [ -z "$ESPERADO" ]; then
-            echo "::warning::La variable de repositorio COMPOSE_SHA256 no está definida: la imagen de arranque no se construye hasta que lo esté."
-            exit 0
-          fi
-          if [ "$ESPERADO" != "$real" ]; then
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "::warning::COMPOSE_SHA256 no coincide con el manifiesto de esta rama. Tras fusionar, actualice la variable a: $real"
-            else
-              echo "::error::COMPOSE_SHA256 ($ESPERADO) no coincide con el manifiesto ($real). Actualice la variable del repositorio antes de publicar."
-              exit 1
-            fi
-          fi
+          sha256=$(sha256sum convenios-laborales/despliegue/compose.yaml | cut -d' ' -f1)
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+          echo "Hash del manifiesto: $sha256"
 
   imagen:
     name: Construir y publicar imagen de arranque
     needs: hash
-    if: vars.COMPOSE_SHA256 != ''
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -106,9 +91,9 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            OPENPACTUM_VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+            OPENPACTUM_VERSION=${{ steps.meta.outputs.version || github.sha }}
             OPENPACTUM_URL_MANIFIESTO=https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_type == 'tag' && github.ref_name || github.sha }}/convenios-laborales/despliegue/compose.yaml
-            OPENPACTUM_COMPOSE_SHA256=${{ vars.COMPOSE_SHA256 }}
+            OPENPACTUM_COMPOSE_SHA256=${{ needs.hash.outputs.sha256 }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha

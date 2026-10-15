@@ -2,9 +2,8 @@
 # Validación local del despliegue autónomo (fase 3).
 #
 # Comprueba lo que se puede comprobar sin arrancar la pila: sintaxis de los scripts, pruebas
-# unitarias y, si hay Docker, la validez del manifiesto con `docker compose config`. El
-# arranque real de la pila (imágenes, volúmenes, permisos) NO se prueba aquí: requiere un
-# equipo con Docker y está pendiente.
+# unitarias y, si hay Docker, la validez del manifiesto con `docker compose config`. No arranca
+# la pila ni comprueba permisos, modelos o integraciones; esas pruebas requieren Docker real.
 #
 # Es un script de desarrollo: necesita el repositorio, python3 y, para las pruebas del
 # manifiesto, PyYAML (python3 -m pip install pyyaml). Docker es opcional.

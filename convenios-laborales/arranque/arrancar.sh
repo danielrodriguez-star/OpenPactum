@@ -89,8 +89,7 @@ verificar_manifiesto() {
 descargar_manifiesto() {
   if [ -z "$SHA_MANIFIESTO" ]; then
     echo "ERROR: esta imagen no tiene fijado COMPOSE_SHA256." >&2
-    echo "Defina la variable de repositorio COMPOSE_SHA256 con el hash del manifiesto y vuelva" >&2
-    echo "a construir/publicar la imagen de arranque." >&2
+    echo "Vuelva a construirla con OPENPACTUM_COMPOSE_SHA256 calculado desde compose.yaml." >&2
     exit 1
   fi
   if [ -z "$URL_MANIFIESTO" ]; then
@@ -123,7 +122,9 @@ descargar_manifiesto() {
 preparar_ficheros() {
   # Se copian siempre: van fijados a esta imagen y tienen que coincidir con el manifiesto.
   cp "$LIB/secretos-init.sh" "$DESPLIEGUE/secretos-init.sh"
+  cp "$LIB/paperless-init.py" "$DESPLIEGUE/paperless-init.py"
   chmod 0644 "$DESPLIEGUE/secretos-init.sh"
+  chmod 0644 "$DESPLIEGUE/paperless-init.py"
   if [ ! -f "$ENTORNO" ]; then
     cp "$LIB/ejemplo.env" "$ENTORNO"
     # Ajustes dependientes de dónde se despliega; el resto de valores los revisa el usuario.
@@ -161,12 +162,16 @@ case "${1:-arriba}" in
     cat <<FIN
 
 Pila arrancada (si algo no responde: $0 registros).
+  Panel OpenPactum  http://localhost:8080
   Changedetection  http://localhost:5000
   Paperless        http://localhost:8000
   AnythingLLM      http://localhost:3001
 
-Quedan pasos manuales (vea convenios-laborales/README.md): administrador de Paperless y sus
-etiquetas, asistente inicial y clave API de AnythingLLM, y el SMTP del monitor.
+Si se creó un administrador nuevo, sus credenciales están en:
+$DATOS/paperless/credenciales.txt
+
+Quedan pasos manuales (vea convenios-laborales/README.md): asistente inicial de AnythingLLM,
+fuentes y avisos de Changedetection, y SMTP del monitor.
 FIN
     ;;
   abajo)
