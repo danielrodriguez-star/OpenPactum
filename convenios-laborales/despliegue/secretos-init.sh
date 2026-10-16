@@ -89,9 +89,10 @@ proyectar() {
 
 preparar_datos() {
   mkdir -p "$DATOS/changedetection" "$DATOS/paperless/consume" "$DATOS/paperless/export" \
-           "$DATOS/anythingllm" "$DATOS/monitor/estado"
+           "$DATOS/anythingllm" "$DATOS/monitor/estado" "$DATOS/panel"
   if [ "$soy_root" = 1 ]; then
-    chown -R "$USUARIO_UID:$USUARIO_GID" "$DATOS/paperless" "$DATOS/anythingllm" "$DATOS/monitor"
+    chown -R "$USUARIO_UID:$USUARIO_GID" "$DATOS/paperless" "$DATOS/anythingllm" \
+      "$DATOS/monitor" "$DATOS/panel"
     chmod 0770 "$DATOS/paperless/consume"
   else
     avisar_sin_root

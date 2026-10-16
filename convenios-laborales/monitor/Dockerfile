@@ -1,5 +1,5 @@
 # Imagen del monitor del BOE de OpenPactum.
-# Usa solo la biblioteca estándar de Python: no instala dependencias.
+# Instala la biblioteca de extracción PDF usada por los resúmenes bajo demanda.
 # Contexto de construcción: convenios-laborales/scripts/ (ver .github/workflows/monitor-imagen.yml).
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 FROM ${PYTHON_IMAGE}
@@ -22,7 +22,10 @@ RUN groupadd --system --gid 10001 openpactum \
  && mkdir -p /data/estado /data/consume \
  && chown -R 10001:10001 /data
 
-COPY monitor-convenios.py panel.py /app/
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --requirement /app/requirements.txt
+
+COPY monitor-convenios.py panel.py openpactum_catalog.py openpactum_regcon.py openpactum_summary.py openpactum_paperless.py /app/
 
 WORKDIR /app
 USER 10001:10001

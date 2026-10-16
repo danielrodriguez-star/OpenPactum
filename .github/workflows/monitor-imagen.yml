@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
 
       - name: Instalar dependencias de prueba
-        run: python3 -m pip install pyyaml
+        run: python3 -m pip install pyyaml -r convenios-laborales/scripts/requirements.txt
 
       - name: Ejecutar pruebas
         run: python3 -m unittest discover -s convenios-laborales/tests -v

@@ -29,4 +29,14 @@ el hash del manifiesto automáticamente al construirla. Vea
 [pendientes](convenios-laborales/docs/INVENTARIO-FASE-5.md). La instalación con `instalar.sh` sigue
 siendo la vía probada hasta que la fase 5 la retire.
 
+El panel permite buscar en tiempo real los registros públicos de REGCON, seleccionar una autoridad
+laboral y abrir las publicaciones oficiales. La cobertura por autoridad indica qué territorios se
+han consultado en este catálogo local; no descarga la colección completa ni representa un censo
+exhaustivo. REGCON mantiene una consulta histórica separada para los registros anteriores al 1 de
+octubre de 2010, enlazada desde el panel pero aún no integrada en sus búsquedas. Los trámites
+consultados se agrupan localmente por código de convenio y autoridad, junto con las fechas y tipos
+de publicación detectados. Cada publicación directa se puede archivar bajo demanda en Paperless:
+conserva los PDF originales y descarga el PDF enlazado desde la página HTML cuando está disponible;
+si no, guarda el texto de la página con la URL oficial de origen.
+
 Vea [convenios-laborales/README.md](convenios-laborales/README.md) para lo que hace el instalador, la instalación manual, límites y operación.

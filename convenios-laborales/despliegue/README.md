@@ -108,9 +108,33 @@ que se crearon los secretos).
   del arranque normal para evitar procesar dos veces el feed junto al programador.
 - Los avisos por correo se configuran con `SMTP_*` en el fichero de entorno; sin `SMTP_HOST` el
   monitor solo deja constancia en el log del contenedor.
-- El panel de http://localhost:8080 muestra disponibilidad, fecha de la última comprobación y
-  accesos a las interfaces. La configuración de fuentes, correo y documentos aún se completa en
-  las herramientas enlazadas.
+- El panel de http://localhost:8080 está orientado a la búsqueda de convenios para RR. HH. y
+  nóminas. Incluye accesos rápidos configurables: educación, acción e intervención social y ocio
+  educativo vienen de serie, y se pueden añadir sectores con su propio texto de búsqueda en REGCON.
+  Consulta los registros públicos de REGCON (autoridades estatales, autonómicas y provinciales),
+  permite filtrar la página actual y guardar convenios en el navegador, y abre la publicación
+  oficial cuando existe un enlace directo. «Archivar en Paperless» descarga bajo demanda esa
+  publicación al directorio compartido `paperless/consume`: conserva el PDF original y sigue enlaces
+  a un PDF desde una página HTML; si no hay PDF descargable, guarda la página como texto con su URL
+  de origen. Paperless procesa los documentos de forma asíncrona;
+  la acción no descarga toda la colección. Los resultados son trámites y pueden repetirse para un
+  convenio. REGCON mantiene aparte los registros anteriores
+  al 1 de octubre de 2010. Para cada trámite con publicación PDF o HTML accesible se puede solicitar
+  un resumen con IA local: el panel extrae el texto del documento, lo procesa por fragmentos en segundo plano con
+  Ollama y conserva
+  solo el resumen en `OPENPACTUM_DATOS/panel`; los documentos completos no se guardan ni se envían
+  a servicios externos. Se genera bajo demanda, para evitar precargar y conservar resúmenes de todo
+  REGCON; la primera solicitud puede tardar varios minutos y las siguientes reutilizan la caché si
+  el documento y el modelo no han cambiado. No se pueden resumir trámites sin publicación directa,
+  documentos que no sean PDF/HTML, PDFs escaneados sin texto ni convenios históricos que REGCON no exponga en esta búsqueda.
+  Verifique las referencias de página o artículo en el texto oficial: el contenido generado puede omitir datos
+  o equivocarse y no es asesoramiento jurídico. La ficha del convenio estatal de Acción e
+  Intervención Social 2026-2029 incluye además referencias a artículos y la tabla oficial de salario
+  base bruto anual 2026-2029, con enlace al BOE. El cálculo de complementos y la comparación de
+  versiones aún requieren incorporación y verificación documental. El panel persiste en
+  `OPENPACTUM_DATOS/panel/catalogo.sqlite` los convenios y trámites que aparecen en búsquedas,
+  agrupados por código y autoridad; es un catálogo de lo consultado, no la importación completa
+  de REGCON. Los favoritos continúan en el almacenamiento local del navegador.
 - El asistente inicial de AnythingLLM y su clave API siguen siendo pasos manuales.
 
 ## Arranque con un solo comando (fase 4)

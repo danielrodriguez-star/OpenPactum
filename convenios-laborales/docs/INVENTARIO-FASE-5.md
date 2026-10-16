@@ -44,6 +44,38 @@ Ninguna de estas está puesta (no se han probado y algunas pueden romper servici
 
 ## 4. Funcionalidad que sigue siendo manual
 
+- El panel consulta en tiempo real los registros públicos de REGCON y enlaza a la publicación
+  oficial. Desde resultados con publicación directa se puede añadir el PDF original, incluido el PDF
+  enlazado desde una página HTML, o la transcripción de la página cuando no hay PDF descargable, al
+  directorio de entrada de Paperless; la importación es bajo demanda y Paperless procesa los
+  documentos de forma asíncrona. Los resultados son trámites y
+  pueden repetir un mismo convenio (texto nuevo, revisiones, etc.). REGCON separa
+  la consulta de registros anteriores al 1 de octubre de 2010; no se presenta esta búsqueda como
+  una copia local completa ni como una consulta histórica exhaustiva.
+- El panel conserva en `OPENPACTUM_DATOS/panel/catalogo.sqlite` un catálogo local de los resultados
+  consultados, agrupando los trámites por código REGCON y autoridad. Cada publicación conserva su
+  tipo de trámite, fechas y consulta de origen. No se precargan registros: hay que consultar cada
+  búsqueda para que el convenio y sus versiones aparezcan en el catálogo. Los favoritos y sectores
+  personalizados siguen siendo específicos de cada navegador.
+- La búsqueda actual permite seleccionar una autoridad de la lista pública que REGCON ofrece en
+  ese momento. La sección de cobertura compara esa lista con las autoridades ya observadas en el
+  catálogo; no demuestra que se hayan capturado todos sus convenios. La consulta histórica
+  independiente de REGCON para registros anteriores al 1 de octubre de 2010 se enlaza como fuente,
+  pero todavía no se consulta desde OpenPactum.
+- El panel ofrece accesos de sector editables (tres iniciales y hasta 40 adicionales), búsqueda,
+  filtros de territorio y tipo de trámite sobre la página actual y una lista de seguimiento que se
+  conserva solo en el navegador actual. Para los trámites con publicación oficial directa en PDF o
+  HTML se puede generar un resumen bajo demanda, extrayendo el documento y usando Ollama local; el resumen
+  persistido se guarda en `OPENPACTUM_DATOS/panel`, no el PDF. La caché se identifica por huella del
+  contenido y modelo, y una sola generación se admite simultáneamente. Los PDF se citan por página y
+  las páginas web por sección cuando está disponible. No cubre trámites sin publicación directa,
+  documentos que no sean PDF/HTML, PDF escaneado sin texto ni la consulta histórica de REGCON; los resúmenes son
+  orientativos y requieren contraste humano. La ficha salarial estructurada disponible del convenio
+  estatal de Acción e Intervención Social 2026-2029 resume ámbitos, vigencia, jornada, vacaciones
+  y retribución con referencias a artículos, e incluye los salarios base brutos anuales de los
+  grupos profesionales 0-4 para 2026-2029, cotejados con el anexo II del BOE-A-2026-4641. Los
+  importes no incluyen complementos. El cálculo de complementos, escenarios y comparación de
+  versiones requieren incorporación y verificación documental.
 - Asistente inicial y clave API de AnythingLLM; subir los PDF a los workspaces (Paperless y
   AnythingLLM no se sincronizan solos).
 - Configurar SMTP del monitor y las fuentes de Changedetection.

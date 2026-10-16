@@ -207,6 +207,7 @@ services:
     restart: unless-stopped
     depends_on:
       secretos-init: {condition: service_completed_successfully}
+      ollama: {condition: service_started}
     user: "${USERMAP_UID:-1000}:${USERMAP_GID:-1000}"
     entrypoint: ["python3", "/app/panel.py"]
     ports: ["127.0.0.1:8080:8080"]
@@ -214,9 +215,15 @@ services:
       OPENPACTUM_PANEL_HOST: 0.0.0.0
       OPENPACTUM_PANEL_PORT: 8080
       OPENPACTUM_PANEL_ESTADO: /estado/estado-rss.json
-      OPENPACTUM_PANEL_CAMBIOS: /estado
+      OPENPACTUM_PANEL_CACHE: /cache/resumenes
+      OPENPACTUM_PANEL_CATALOG: /cache/catalogo.sqlite
+      OPENPACTUM_OLLAMA_URL: http://ollama:11434
+      OPENPACTUM_OLLAMA_MODEL: ${OPENPACTUM_MODELO:-llama3.1:8b}
+      OPENPACTUM_PAPERLESS_CONSUME: /consume
     volumes:
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/monitor:/estado:ro
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/panel:/cache
+      - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/paperless/consume:/consume
 
   # Programador: primera ejecución al iniciar y después cada OPENPACTUM_INTERVALO segundos.
   programador:

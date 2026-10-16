@@ -58,10 +58,30 @@ Estructura: `changedetection/`, `paperless/consume/`, `paperless/export/`, `anyt
 
 ## Accesos y activación
 
-- Panel OpenPactum (solo despliegue autónomo): http://localhost:8080 — resumen local del estado de
-  los servicios, la última comprobación del BOE y accesos a las herramientas. No sustituye su
-  configuración: las fuentes, el SMTP y la carga/organización documental se preparan en las
-  herramientas enlazadas.
+- Panel OpenPactum (solo despliegue autónomo): http://localhost:8080 — estado de los servicios,
+  última comprobación del BOE y búsqueda nacional en tiempo real en REGCON. Se pueden añadir
+  sectores con el texto de búsqueda propio y guardar convenios en este navegador. La ficha del
+  convenio estatal de Acción e Intervención Social 2026-2029 incluye resumen con referencias y
+  tabla de salario base bruto anual para los grupos 0-4. Además, cada trámite con publicación oficial
+  directa en PDF o HTML puede resumirse bajo demanda con IA local (Ollama): el resumen se genera por
+  fragmentos en segundo plano, con referencias a páginas o secciones, y queda en caché en `OPENPACTUM_DATOS/panel`; solo se descargan los
+  documentos al solicitarlos y no se envían a servicios externos. No hay resumen disponible para
+  trámites sin publicación directa o PDF escaneado sin texto extraíble. Verifique siempre el
+  resumen contra el documento oficial; no es asesoramiento jurídico. Los salarios de la ficha se
+  basan en BOE-A-2026-4641, no incluyen complementos y no se extrapolan a otros convenios. La
+  búsqueda en tiempo real permite elegir una autoridad laboral de la lista pública actual de REGCON
+  (estatal, autonómica o provincial), y la sección de cobertura compara esa lista con las
+  autoridades que tienen resultados observados en el catálogo. Es una medida de las búsquedas
+  realizadas, no un censo completo. Las publicaciones directas se pueden archivar bajo demanda en
+  Paperless: se conservan los PDF originales y se intenta descargar el PDF enlazado desde una página
+  HTML; si no existe, la página se guarda como texto con su URL de origen en el directorio de entrada
+  compartido. REGCON mantiene una consulta histórica separada
+  para los registros anteriores al 1 de octubre de 2010; el panel la enlaza, pero todavía no la
+  consulta. El panel mantiene `OPENPACTUM_DATOS/panel/catalogo.sqlite`,
+  un catálogo local que agrupa por código y autoridad los trámites vistos en las búsquedas. No es
+  una importación completa de REGCON; los favoritos siguen guardándose en este navegador. Las
+  fuentes de vigilancia, el SMTP y la carga/organización
+  documental se configuran en las herramientas enlazadas.
 
 - Changedetection: http://localhost:5000 — añada allí las fuentes que el monitor no cubre (REGCON es web, no RSS; vea `scripts/fuentes-rss.txt`) y las URL de sus boletines provinciales. Ajuste filtros por convenio y selectores para reducir falsos avisos. Configure notificaciones en la interfaz con una URL Apprise `mailto://USUARIO:CLAVE@SERVIDOR:587/?to=DESTINO&from=ORIGEN`; codifique caracteres especiales de usuario/clave y utilice TLS según su servidor. Guarde la URL solo en la interfaz local; proteja el acceso. Sin SMTP no hay alertas de Changedetection.
 - Paperless: http://localhost:8000 — el despliegue autónomo crea el administrador y sus etiquetas al primer arranque. Las credenciales se guardan en `paperless/credenciales.txt` dentro de `OPENPACTUM_DATOS` (modo 600 en Linux); cámbiela tras el primer acceso. Con `instalar.sh`, las credenciales están en el `credenciales.txt` de la instalación. En instalación manual, cree el administrador con `docker compose exec paperless python manage.py createsuperuser`; en Perfil → tokens API obtenga token y ejecute `PAPERLESS_TOKEN='...' ./scripts/crear-etiquetas.sh`. El OCR español/inglés se aplica automáticamente a PDFs colocados en `paperless/consume/`; compruebe que hay texto extraído. La carpeta `consume/` es local al host y Paperless retira ficheros al procesarlos.

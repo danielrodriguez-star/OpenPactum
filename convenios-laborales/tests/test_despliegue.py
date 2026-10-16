@@ -148,12 +148,19 @@ class ManifiestoTest(unittest.TestCase):
         self.assertEqual(self.servicios['monitor']['profiles'], ['manual'])
         self.assertNotIn('profiles', self.servicios['programador'])
 
-    def test_el_panel_es_local_y_solo_lee_el_estado_del_monitor(self):
+    def test_el_panel_es_local_y_comparte_entrada_de_paperless(self):
         panel = self.servicios['panel']
         self.assertEqual(panel['ports'], ['127.0.0.1:8080:8080'])
         self.assertEqual(panel['volumes'], [
             '/var/lib/openpactum/datos/monitor:/estado:ro',
+            '/var/lib/openpactum/datos/panel:/cache',
+            '/var/lib/openpactum/datos/paperless/consume:/consume',
         ])
+        self.assertEqual(panel['environment']['OPENPACTUM_PANEL_CACHE'], '/cache/resumenes')
+        self.assertEqual(panel['environment']['OPENPACTUM_PANEL_CATALOG'], '/cache/catalogo.sqlite')
+        self.assertEqual(panel['environment']['OPENPACTUM_OLLAMA_URL'], 'http://ollama:11434')
+        self.assertEqual(panel['environment']['OPENPACTUM_PAPERLESS_CONSUME'], '/consume')
+        self.assertEqual(panel['depends_on']['ollama']['condition'], 'service_started')
 
 
 class PrefijoTest(unittest.TestCase):

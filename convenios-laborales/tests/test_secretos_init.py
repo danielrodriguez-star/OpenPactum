@@ -110,7 +110,7 @@ class GenerarTest(unittest.TestCase):
     def test_prepara_el_arbol_de_datos(self):
         self.generar()
         for directorio in ('changedetection', 'paperless/consume', 'paperless/export',
-                           'anythingllm', 'monitor/estado', 'secretos'):
+                           'anythingllm', 'monitor/estado', 'panel', 'secretos'):
             with self.subTest(directorio=directorio):
                 self.assertTrue((self.datos / directorio).is_dir())
 
