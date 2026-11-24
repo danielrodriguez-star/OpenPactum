@@ -1,0 +1,3 @@
+# Dependencias de desarrollo y pruebas. Instalar desde convenios-laborales/scripts.
+-r requirements.txt
+PyYAML==6.0.2

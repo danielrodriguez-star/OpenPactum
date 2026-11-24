@@ -86,8 +86,15 @@ def download_document(url):
         with opener.open(request, timeout=30) as response:
             _validate_official_url(response.geturl())
             content_length = response.headers.get('Content-Length')
-            if content_length and int(content_length) > MAX_PDF_BYTES:
-                raise SummaryError('El documento oficial supera el límite de 50 MB.')
+            if content_length is not None:
+                try:
+                    declared_length = int(content_length)
+                except (TypeError, ValueError) as exc:
+                    raise SummaryError('La publicación oficial indicó un tamaño inválido.') from exc
+                if declared_length < 0:
+                    raise SummaryError('La publicación oficial indicó un tamaño inválido.')
+                if declared_length > MAX_PDF_BYTES:
+                    raise SummaryError('El documento oficial supera el límite de 50 MB.')
             content = response.read(MAX_PDF_BYTES + 1)
             content_type = response.headers.get_content_type()
             charset = response.headers.get_content_charset() or 'utf-8'

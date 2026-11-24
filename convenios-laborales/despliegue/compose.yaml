@@ -73,8 +73,8 @@ services:
       - ${OPENPACTUM_DATOS:-/var/lib/openpactum/datos}/changedetection:/datastore
 
   redis:
-    # Pendiente (fase 5): fijar una etiqueta concreta en vez de la rama 7-alpine.
-    image: redis:7-alpine
+    # Versión fijada para que nuevas instalaciones no cambien al moverse la etiqueta mayor.
+    image: redis:7.4.2-alpine
     restart: unless-stopped
     volumes:
       - redis_datos:/data
