@@ -1028,10 +1028,16 @@ class Handler(BaseHTTPRequestHandler):
             self._respond('application/json; charset=utf-8', b'{"error":"Se requiere JSON."}', 415)
             return
         try:
-            length = int(self.headers.get('Content-Length', '0'))
+            raw_length = self.headers.get('Content-Length')
+            if raw_length is None or not raw_length.isascii() or not raw_length.isdecimal():
+                raise ValueError('La longitud de la solicitud no es válida.')
+            length = int(raw_length)
             if length < 1 or length > 8192:
                 raise ValueError('El tamaño de la solicitud no es válido.')
-            request = json.loads(self.rfile.read(length))
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise ValueError('La solicitud llegó incompleta.')
+            request = json.loads(body)
             if not isinstance(request, dict):
                 raise ValueError('El contenido de la solicitud no es válido.')
             mode = request.get('mode')
@@ -1043,9 +1049,12 @@ class Handler(BaseHTTPRequestHandler):
             code = request.get('code')
             if (
                 not isinstance(query, str)
+                or not 1 <= len(query) <= 100
                 or type(page) is not int
                 or not isinstance(record, str)
+                or len(record) > 12
                 or not isinstance(authority, str)
+                or len(authority) > 100
                 or not isinstance(title, str)
                 or len(title) > 500
                 or not isinstance(code, str)

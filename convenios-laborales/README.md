@@ -2,6 +2,21 @@
 
 **Estado:** el instalador y la configuración se han validado sin Docker (sintaxis, `shellcheck`, esquema de Compose y simulación del instalador); **no se han probado todavía en una máquina con Docker**. No se garantiza cumplimiento RGPD por instalar software: evalúe además acceso, copias, retención y proveedor SMTP.
 
+## Desarrollo y pruebas
+
+Desde la raíz del repositorio, prepare un entorno virtual e instale las dependencias de desarrollo:
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r convenios-laborales/scripts/requirements-dev.txt
+python3 -m unittest discover -s convenios-laborales/tests -v
+```
+
+Las pruebas son locales y no necesitan Docker, red ni Ollama. Para validar también scripts y el
+manifiesto del despliegue, ejecute `convenios-laborales/despliegue/validar-despliegue.sh` (requiere
+Docker Compose v2 y ShellCheck).
+
 ## Dos formas de instalar
 
 - **Despliegue autónomo (fases 3-4, validado con Docker Desktop en Windows)**:

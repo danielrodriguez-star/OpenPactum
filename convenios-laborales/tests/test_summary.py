@@ -26,6 +26,16 @@ class SummaryTest(TestCase):
             with self.subTest(url=url), self.assertRaises(SUMMARY.SummaryError):
                 SUMMARY._validate_official_url(url)
 
+    def test_rechaza_content_length_invalido(self):
+        with patch.object(SUMMARY, '_validate_official_url', return_value='https://www.boe.es/a'):
+            with patch.object(SUMMARY.urllib.request, 'build_opener') as build_opener:
+                response = build_opener.return_value.open.return_value.__enter__.return_value
+                response.geturl.return_value = 'https://www.boe.es/a'
+                response.headers = Message()
+                response.headers['Content-Length'] = 'desconocido'
+                with self.assertRaisesRegex(SUMMARY.SummaryError, 'tamaño inválido'):
+                    SUMMARY.download_document('https://www.boe.es/a')
+
     def test_descarga_publicacion_html_oficial(self):
         with patch.object(SUMMARY, '_validate_official_url', return_value='https://www.boe.es/a'):
             with patch.object(SUMMARY.urllib.request, 'build_opener') as build_opener:
